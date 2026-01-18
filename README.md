@@ -10,12 +10,14 @@
 ## 📋 Table of Contents
 
 - [About](#-about)
-- [Tech Stack](#-tech-stack)
+- [Team Rules](#-team-rules)
+- [How to Join the Project](#-how-to-join-the-project)
+- [Branch Strategy](#-branch-strategy)
+- [Your Daily Workflow](#-your-daily-workflow)
+- [Commit Rules](#-commit-rules)
+- [Weekly Meetings](#-weekly-meetings)
 - [Project Structure](#-project-structure)
 - [Getting Started](#-getting-started)
-- [Branch Strategy](#-branch-strategy)
-- [Contributing](#-contributing)
-- [Team](#-team)
 
 ---
 
@@ -23,26 +25,266 @@
 
 **SSBS (Smart School Bus System)** is a web application designed to manage and track school bus operations efficiently. This project is part of the 42 school curriculum (ft_transcendence).
 
-### Features
-- [ ] User authentication & authorization
-- [ ] Real-time bus tracking
-- [ ] Route management
-- [ ] Parent/Student notifications
-- [ ] Admin dashboard
-- [ ] Driver interface
+---
+
+## � Tech Stack
+
+> **⚠️ To Be Decided by Each Team Member**
+
+| Layer | Technology | Status | Responsible |
+|-------|------------|--------|-------------|
+| **Frontend** | *TBD* | 🟡 Not decided | Frontend Dev |
+| **Backend** | *TBD* | 🟡 Not decided | Backend Team |
+| **Database** | PostgreSQL | ✅ Confirmed | Backend Team |
+| **Authentication** | *TBD* | 🟡 Not decided | Security/DevOps |
+| **Containerization** | Docker & Docker Compose | ✅ Confirmed | Security/DevOps |
+| **CI/CD** | GitHub Actions | ✅ Confirmed | Security/DevOps |
+
+### How Tech Decisions Work:
+- **Frontend Dev** → Chooses frontend framework (React, Vue, Vanilla JS, etc.)
+- **Backend Team** → Chooses backend framework (Django, NestJS, Node.js, etc.)
+- **Security/DevOps** → Sets up auth system, Docker, deployment
+
+> **Each member decides the tools for their own area!**
 
 ---
 
-## 🛠 Tech Stack
+## �🚨 Team Rules
 
-| Layer | Technology |
-|-------|------------|
-| **Frontend** | *TBD (React/Vue/Vanilla JS)* |
-| **Backend** | *TBD (Django/NestJS/Node.js)* |
-| **Database** | PostgreSQL |
-| **Cache** | Redis |
-| **Containerization** | Docker & Docker Compose |
-| **CI/CD** | GitHub Actions |
+> **⚠️ READ THIS CAREFULLY BEFORE YOU START!**
+
+| Rule | Description |
+|------|-------------|
+| ✅ | **Work ONLY on YOUR branch** |
+| ✅ | **Pull before you start working** |
+| ✅ | **Commit with clear messages** |
+| ✅ | **Create Pull Request for review** |
+| ✅ | **Attend weekly meetings** |
+| ✅ | **Report your weekly progress** |
+| ❌ | **NEVER push directly to `main`, `develop`, `frontend`, or `backend`** |
+| ❌ | **NEVER merge your own PR without review** |
+
+---
+
+## 🤝 How to Join the Project
+
+### Step 1: Accept the Invitation
+1. Check your **email** or **GitHub notifications**
+2. Click **"Accept Invitation"**
+3. You now have access to the repository!
+
+### Step 2: Clone the Repository
+```bash
+git clone https://github.com/USERNAME/SSBS_FT_.git
+cd SSBS_FT_
+```
+
+### Step 3: Set Up Your Environment
+```bash
+cp .env.example .env
+# Edit .env with your values
+```
+
+### Step 4: Find Your Branch
+| Your Role | Your Base Branch | Your Personal Branch Example |
+|-----------|------------------|------------------------------|
+| Frontend Developer | `frontend` | `feat/frontend-login-YOURNAME` |
+| Backend Developer | `backend` | `feat/backend-api-YOURNAME` |
+| Security & DevOps | `develop` | `feat/security-auth-YOURNAME` |
+
+---
+
+## 🌳 Branch Strategy
+
+```
+main                    ← 🔒 PROTECTED - Only for stable releases
+│
+└── develop             ← 🔒 PROTECTED - Integration branch
+    │
+    ├── frontend        ← Frontend team merges here
+    │   └── feat/frontend-*-YOURNAME    ← YOUR work branch
+    │
+    └── backend         ← Backend team merges here
+        └── feat/backend-*-YOURNAME     ← YOUR work branch
+```
+
+### Branch Rules
+
+| Branch | Who Can Push | Who Can Merge |
+|--------|--------------|---------------|
+| `main` | ❌ Nobody | Team Lead only |
+| `develop` | ❌ Nobody | After review |
+| `frontend` | ❌ Nobody | After PR review |
+| `backend` | ❌ Nobody | After PR review |
+| `feat/*-YOURNAME` | ✅ Only YOU | YOU → via PR |
+
+---
+
+## 🔄 Your Daily Workflow
+
+### 🟢 EVERY DAY Before You Start:
+
+```bash
+# 1. Go to your base branch
+git checkout frontend      # (or backend if you're backend dev)
+
+# 2. Get latest changes
+git pull origin frontend
+
+# 3. Go to your feature branch (or create one)
+git checkout feat/frontend-login-yourname
+
+# 4. Merge latest changes into your branch
+git merge frontend
+```
+
+### 🟡 While Working:
+
+```bash
+# Make small commits often!
+git add .
+git commit -m "feat(frontend): add login button"
+
+# Push your work (save it to GitHub)
+git push origin feat/frontend-login-yourname
+```
+
+### 🔴 When Your Feature is DONE:
+
+```bash
+# 1. Push all your changes
+git push origin feat/frontend-login-yourname
+
+# 2. Go to GitHub website
+# 3. Create Pull Request:
+#    FROM: feat/frontend-login-yourname
+#    TO:   frontend
+# 4. Request review from a teammate
+# 5. Wait for approval
+# 6. Merge after approval
+```
+
+---
+
+## ✍️ Commit Rules
+
+### Format
+```
+<type>(<scope>): <description>
+```
+
+### Types
+| Type | When to Use |
+|------|-------------|
+| `feat` | New feature |
+| `fix` | Bug fix |
+| `style` | CSS, formatting |
+| `refactor` | Code improvement |
+| `docs` | Documentation |
+
+### Examples
+
+```bash
+# ✅ GOOD - Be clear and specific
+git commit -m "feat(frontend): add user login form"
+git commit -m "fix(frontend): fix button alignment on mobile"
+git commit -m "style(frontend): update dashboard colors"
+
+# ❌ BAD - NEVER DO THIS
+git commit -m "update"
+git commit -m "fix"
+git commit -m "done"
+git commit -m "asdf"
+git commit -m "changes"
+```
+
+---
+
+## 📅 Weekly Meetings
+
+> **🚨 MANDATORY FOR ALL TEAM MEMBERS**
+
+### Meeting Schedule
+| Day | Time | Platform |
+|-----|------|----------|
+| **Every Sunday** | **20:00 (8 PM)** | Discord / Google Meet |
+
+*(Update day/time based on team agreement)*
+
+---
+
+## 📝 Weekly Progress Report
+
+> **Before EVERY meeting, each member MUST prepare this report!**
+
+### Report Template
+
+Copy this and fill it before the meeting:
+
+```markdown
+═══════════════════════════════════════════════════
+📊 WEEKLY REPORT - [YOUR NAME]
+═══════════════════════════════════════════════════
+📅 Week: [DATE] to [DATE]
+🌿 My Branch: feat/frontend-xxx-myname
+
+───────────────────────────────────────────────────
+✅ WHAT I DID THIS WEEK:
+───────────────────────────────────────────────────
+1. [Task 1] - DONE ✓
+2. [Task 2] - DONE ✓
+3. [Task 3] - 80% complete
+
+───────────────────────────────────────────────────
+🔨 WHAT I'M CURRENTLY WORKING ON:
+───────────────────────────────────────────────────
+- Task: [description]
+- Progress: XX%
+- Expected completion: [date]
+
+───────────────────────────────────────────────────
+🎯 WHAT I WILL DO NEXT WEEK:
+───────────────────────────────────────────────────
+1. [ ] Planned task 1
+2. [ ] Planned task 2
+3. [ ] Planned task 3
+
+───────────────────────────────────────────────────
+❌ BLOCKERS / PROBLEMS:
+───────────────────────────────────────────────────
+- [Any issues or help needed]
+
+───────────────────────────────────────────────────
+🔗 MY PULL REQUESTS THIS WEEK:
+───────────────────────────────────────────────────
+- PR #XX: [title] - [merged/pending]
+
+═══════════════════════════════════════════════════
+```
+
+### Meeting Agenda (45 min)
+| Time | Topic |
+|------|-------|
+| 5 min | Check-in - Is everyone here? |
+| 20 min | Each member presents their report |
+| 10 min | Discuss blockers & help each other |
+| 10 min | Plan next week's goals |
+
+---
+
+## 📊 How We Track Your Work
+
+### Everyone Can See:
+- ✅ Your **commits** on GitHub
+- ✅ Your **Pull Requests**
+- ✅ Your **branch activity**
+- ✅ Your **code reviews**
+
+### Evaluators Will Check:
+- Individual contribution per member
+- Commit history & quality
+- PR review process
+- **Fair work distribution!**
 
 ---
 
@@ -50,25 +292,18 @@
 
 ```
 SSBS_FT_/
-├── frontend/               # Frontend application
-│   ├── src/               # Source files
-│   ├── public/            # Static assets
-│   └── package.json       # Frontend dependencies
+├── frontend/               # 👈 Frontend developers work here
+│   └── src/
 │
-├── backend/                # Backend application
-│   ├── src/               # Source files
-│   ├── tests/             # Unit & integration tests
-│   └── requirements.txt   # Backend dependencies (if Python)
+├── backend/                # 👈 Backend developers work here
+│   └── src/
 │
-├── shared/                 # Shared utilities, types, API contracts
-│
-├── docs/                   # Documentation
-│
-├── docker-compose.yml      # Docker orchestration
-├── .env.example           # Environment variables template
-├── .gitignore             # Git ignore rules
-├── CONTRIBUTING.md        # Contribution guidelines
-└── README.md              # This file
+├── shared/                 # Shared utilities & types
+├── docs/                   # Documentation & meeting notes
+├── docker-compose.yml      # Docker setup
+├── .env.example            # Environment template
+├── CONTRIBUTING.md         # Detailed contribution guide
+└── README.md               # This file
 ```
 
 ---
@@ -76,177 +311,82 @@ SSBS_FT_/
 ## 🚀 Getting Started
 
 ### Prerequisites
+- Docker & Docker Compose
+- Git
+- Node.js (for frontend)
 
-- **Docker** & **Docker Compose** installed
-- **Git** configured
-- **Make** (optional, for Makefile commands)
-
-### Installation
+### Quick Start
 
 ```bash
-# 1. Clone the repository
-git clone https://github.com/YOUR_USERNAME/SSBS_FT_.git
+# 1. Clone
+git clone https://github.com/USERNAME/SSBS_FT_.git
 cd SSBS_FT_
 
-# 2. Copy environment variables
+# 2. Setup environment
 cp .env.example .env
 
-# 3. Edit .env with your configuration
-nano .env  # or your preferred editor
-
-# 4. Start the application
+# 3. Run with Docker
 docker-compose up --build
 
-# 5. Access the application
+# 4. Access
 # Frontend: http://localhost:3000
 # Backend:  http://localhost:8000
 ```
 
----
-
-## 🌳 Branch Strategy
-
-We follow a **professional branching model** for clean collaboration and evaluation.
-
-### Branch Overview
-
-```
-main                    ← Production-ready, evaluation branch
-│
-└── develop             ← Integration branch (all features merge here first)
-    │
-    ├── frontend        ← Frontend integration branch
-    │   ├── feat/frontend-auth-<name>
-    │   ├── feat/frontend-dashboard-<name>
-    │   └── feat/frontend-tracking-<name>
-    │
-    ├── backend         ← Backend integration branch
-    │   ├── feat/backend-api-<name>
-    │   ├── feat/backend-auth-<name>
-    │   └── feat/backend-database-<name>
-    │
-    └── devops          ← DevOps & infrastructure
-        ├── feat/devops-docker-<name>
-        └── feat/devops-ci-<name>
-```
-
-### Branch Naming Convention
-
-| Type | Format | Example |
-|------|--------|---------|
-| Feature | `feat/<area>-<feature>-<name>` | `feat/frontend-auth-adil` |
-| Bugfix | `fix/<area>-<issue>-<name>` | `fix/backend-login-sara` |
-| Hotfix | `hotfix/<issue>` | `hotfix/critical-auth-bug` |
-
-### Branch Rules
-
-| Branch | Protection | Who Merges | Merge From |
-|--------|------------|------------|------------|
-| `main` | 🔒 Protected | Team Lead | `develop` only |
-| `develop` | 🔒 Protected | Any reviewer | `frontend`, `backend`, `devops` |
-| `frontend` | Semi-protected | Frontend lead | `feat/frontend-*` |
-| `backend` | Semi-protected | Backend lead | `feat/backend-*` |
-| Personal | None | Owner | N/A |
-
-### Merge Workflow
-
-```
-1. feat/frontend-auth-adil  →  frontend     (via PR, reviewed)
-2. frontend                 →  develop      (via PR, tested)
-3. develop                  →  main         (via PR, stable only)
-```
-
----
-
-## 🤝 Contributing
-
-Please read **[CONTRIBUTING.md](CONTRIBUTING.md)** for detailed contribution guidelines.
-
-### Quick Start for Contributors
-
+### Useful Commands
 ```bash
-# 1. Make sure you're on develop
-git checkout develop
-git pull origin develop
-
-# 2. Create your feature branch
-git checkout -b feat/frontend-your-feature-yourname
-
-# 3. Work on your feature
-# ... make changes ...
-
-# 4. Commit with proper message format
-git add .
-git commit -m "feat(frontend): add login form validation"
-
-# 5. Push your branch
-git push origin feat/frontend-your-feature-yourname
-
-# 6. Create a Pull Request on GitHub
-```
-
-### Commit Message Format
-
-We use **Conventional Commits**:
-
-```
-<type>(<scope>): <description>
-
-[optional body]
-```
-
-**Types:**
-- `feat`: New feature
-- `fix`: Bug fix
-- `docs`: Documentation
-- `style`: Formatting (no code change)
-- `refactor`: Code restructuring
-- `test`: Adding tests
-- `chore`: Maintenance
-
-**Examples:**
-```bash
-# ✅ GOOD commits
-git commit -m "feat(frontend): add user login page"
-git commit -m "fix(backend): resolve JWT token expiration issue"
-git commit -m "docs: update API documentation"
-
-# ❌ BAD commits
-git commit -m "update"
-git commit -m "fix stuff"
-git commit -m "asdfasdf"
+make help      # Show all available commands
+make up        # Start all services
+make down      # Stop all services
+make logs      # View logs
 ```
 
 ---
 
-## 👥 Team
+## 👥 Team (4 Members)
 
-| Member | Role | Branch Area |
-|--------|------|-------------|
-| *Name 1* | Team Lead / Backend | `backend`, `devops` |
-| *Name 2* | Frontend Lead | `frontend` |
-| *Name 3* | Backend Developer | `backend` |
-| *Name 4* | Frontend Developer | `frontend` |
-| *Name 5* | DevOps / Full-stack | `devops`, support |
+| Member | Role | Responsibility | Branch | GitHub |
+|--------|------|----------------|--------|--------|
+| *Name 1* | Frontend Developer | UI/UX, Frontend Logic | `frontend` | @username |
+| *Name 2* | Backend Developer | API, Database | `backend` | @username |
+| *Name 3* | Backend Developer | API, Database | `backend` | @username |
+| *Name 4* | Security & DevOps | Auth, Docker, CI/CD | `develop` | @username |
 
-> **Note:** Update this table with actual team member names and GitHub usernames.
-
----
-
-## 📜 License
-
-This project is part of the 42 school curriculum.
+> **Note:** Each member is responsible for their own area. Update names and GitHub usernames.
 
 ---
 
-## 🔗 Links
+## 📞 Communication
 
-- [42 ft_transcendence Subject](https://projects.intra.42.fr/)
-- [Project Board](https://github.com/YOUR_USERNAME/SSBS_FT_/projects)
-- [Issues](https://github.com/YOUR_USERNAME/SSBS_FT_/issues)
+| Channel | Link |
+|---------|------|
+| **Discord Server** | [Join Link] |
+| **Meeting Room** | [Google Meet / Discord] |
+| **Project Board** | [GitHub Projects Link] |
+
+---
+
+## ⚠️ Important Reminders
+
+### DO ✅
+- Pull latest changes every day
+- Make small, frequent commits
+- Ask for help when stuck
+- Review teammates' PRs
+- Attend all meetings
+- Submit weekly reports
+
+### DON'T ❌
+- Push to protected branches
+- Skip meetings without notice
+- Leave PRs open too long
+- Write unclear commit messages
+- Work without creating a branch
 
 ---
 
 <p align="center">
+  <b>🚀 Let's build something great together! 🚀</b>
+  <br><br>
   Made with ❤️ by the SSBS Team
 </p>
