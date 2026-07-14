@@ -48,6 +48,17 @@ class ReservationAPITests(APITestCase):
 		self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 		self.assertTrue(Reservation.objects.filter(id=response.data['id']).exists())
 
+	def test_cannot_reserve_on_behalf_of_another_user(self):
+		"""A client-supplied user_id must be ignored — the reservation belongs to request.user (C1 IDOR)."""
+		trip = self._create_trip()
+		# Authenticated as self.user, but try to attribute the reservation to other_user.
+		payload = {'trip': str(trip.id), 'user_id': str(self.other_user.id)}
+		response = self.client.post(self.list_url, payload, format='json')
+		self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+		reservation = Reservation.objects.get(id=response.data['id'])
+		self.assertEqual(reservation.student_id, self.user.id)
+		self.assertFalse(Reservation.objects.filter(student=self.other_user).exists())
+
 	def test_create_reservation_duplicate_returns_400(self):
 		trip = self._create_trip()
 		payload = {'trip': str(trip.id), 'user_id': str(self.user.id)}

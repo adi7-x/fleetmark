@@ -42,10 +42,9 @@ class ReservationListCreateView(APIView):
 
 	def post(self, request):
 		trip_id = request.data.get('trip')
-		user_id = request.data.get('user_id')
-		if not trip_id or not user_id:
+		if not trip_id:
 			return Response(
-				{'detail': 'trip and user_id are required.'},
+				{'detail': 'trip is required.'},
 				status=status.HTTP_400_BAD_REQUEST,
 			)
 
@@ -61,7 +60,7 @@ class ReservationListCreateView(APIView):
 
 				start_dt, end_dt = get_bus_day_bounds(trip.departure_datetime)
 				if Reservation.objects.filter(
-					student_id=user_id,
+					student=request.user,
 					trip__departure_datetime__gte=start_dt,
 					trip__departure_datetime__lte=end_dt
 				).exists():
@@ -71,7 +70,7 @@ class ReservationListCreateView(APIView):
 					)
 
 				try:
-					reservation = Reservation.objects.create(trip=trip, student_id=user_id)
+					reservation = Reservation.objects.create(trip=trip, student=request.user)
 				except IntegrityError:
 					return Response(
 						{'detail': 'Already reserved.'},

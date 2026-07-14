@@ -77,10 +77,31 @@ class TripAPITests(APITestCase):
 
 	@patch('apps.trips.views.localtime')
 	@patch('apps.trips.views.now')
-	def test_available_trips_returns_empty_outside_windows(self, mock_now, mock_localtime):
+	def test_available_trips_returns_tonights_trip_during_daytime(self, mock_now, mock_localtime):
+		# Business rule: a student can book tonight's bus during the day
+		# (reserve by 9pm for a 1am departure). At 10:00 the upcoming 21:00
+		# trip is within tonight's 21:00->06:00 window and must be listed.
 		self.client.force_authenticate(user=self.student_user)
-		self._create_trip()
+		trip = self._create_trip()
 		fake_time = datetime(2026, 1, 1, 10, 0, tzinfo=dt_timezone.utc)
+		mock_now.return_value = fake_time
+		mock_localtime.side_effect = lambda value: fake_time
+
+		response = self.client.get(self.available_url, {'station_id': str(self.station.id)})
+
+		self.assertEqual(response.status_code, status.HTTP_200_OK)
+		self.assertEqual(len(response.data), 1)
+		self.assertEqual(response.data[0]['id'], str(trip.id))
+
+	@patch('apps.trips.views.localtime')
+	@patch('apps.trips.views.now')
+	def test_available_trips_empty_for_past_night_window(self, mock_now, mock_localtime):
+		# A trip that belongs to a previous night's window must NOT appear:
+		# on Jan 2 the window is Jan 2 21:00 -> Jan 3 06:00, so the Jan 1 trip
+		# is out of range.
+		self.client.force_authenticate(user=self.student_user)
+		self._create_trip()  # departs 2026-01-01T21:00:00Z
+		fake_time = datetime(2026, 1, 2, 10, 0, tzinfo=dt_timezone.utc)
 		mock_now.return_value = fake_time
 		mock_localtime.side_effect = lambda value: fake_time
 
