@@ -33,7 +33,7 @@ Fleetmark is a full-stack web application that digitizes shuttle bus management 
 | **Mohamed Lahrech** (`mlahrech`) | Tech Lead / Backend | System architecture, API design, reservation & trip logic (Django) |
 | **Aamir Tahtah** (`atahtah`) | Project Manager / DevOps | Docker infrastructure, ELK logging, WAF, CI/CD |
 | **Abderrahman Chakour** (`achakour`) | Backend Developer | 42 OAuth, JWT auth, permissions, HashiCorp Vault |
-| **Ayoub El Haouti** (`aelhaouti`) | QA Engineer / Backend | Automated tests (86/86 passing), API reliability, endpoints |
+| **Ayoub El Haouti** (`aelhaouti`) | QA Engineer / Backend | Automated tests (52/52 passing), API reliability, endpoints |
 
 ---
 
@@ -107,7 +107,7 @@ Fleetmark is a full-stack web application that digitizes shuttle bus management 
 | WAF / ModSecurity | Aamir Tahtah | NGINX reverse proxy with CRS ruleset; custom rules for API paths |
 | ELK logging pipeline | Aamir Tahtah | Logstash reads NGINX & Django logs, ships to Elasticsearch; Kibana UI |
 | OpenAPI / Public API | Ayoub El Haouti | drf-spectacular docs; X-API-Key authentication; full CRUD endpoints |
-| Automated test suite | Ayoub El Haouti | 86 passing tests across all apps (buses, trips, reservations, users…) |
+| Automated test suite | Ayoub El Haouti | 52 passing tests across all apps (buses, trips, reservations, users…) |
 
 ---
 
@@ -120,7 +120,7 @@ Fleetmark is a full-stack web application that digitizes shuttle bus management 
 | # | Module Name | Category | Type | Pts | Implementation | Owner |
 |---|-------------|----------|------|-----|----------------|-------|
 | 1 | **Use a Framework as both frontend AND backend** | Web | **Major** | **2** | React 19 (Vite SPA) + Django 4.2 / DRF | Adil + Mohamed |
-| 2 | **Use an ORM for the database** | Web | Minor | 1 | Django ORM with PostgreSQL 15; full model coverage verified via automated test suite (86/86) | Mohamed + Ayoub |
+| 2 | **Use an ORM for the database** | Web | Minor | 1 | Django ORM with PostgreSQL 15; full model coverage verified via automated test suite (52/52) | Mohamed + Ayoub |
 | 3 | **Public API** (API key + rate-limit + OpenAPI docs + 5 endpoints) | Web | **Major** | **2** | drf-spectacular, `X-API-Key` header auth, GET/POST/PUT/DELETE/PATCH routes | Ayoub |
 | 4 | **Notification / Announcement System** | Web | Minor | 1 | Priority announcements (info/warning/urgent), dismiss tracking, bell badge | Mohamed |
 | 5 | **Custom Design System** | Web | Minor | 1 | 20+ reusable components (Button, Card, Modal, Badge, Input, Select, DataTable, Spinner, EmptyState, PageHeader…) + full CSS token system | Adil |
@@ -177,7 +177,7 @@ Fleetmark is a full-stack web application that digitizes shuttle bus management 
 - Implemented TOTP 2FA backend: model fields, pyotp setup/verify/disable endpoints
 
 ### Ayoub El Haouti — QA Engineer / Backend
-- Wrote 86 automated tests covering all apps (buses, trips, reservations, drivers, users)
+- Wrote 52 automated tests covering all apps (buses, trips, reservations, drivers, users)
 - Implemented drf-spectacular OpenAPI 3.0 schema and API documentation
 - Built and hardened the public API with `X-API-Key` authentication
 - Defined DRF serializer validation and standardized exception handling
@@ -223,7 +223,7 @@ make up          # Build, start all 11 containers, wait for readiness, seed data
 | Service | URL | Notes |
 |---------|-----|-------|
 | **App** | `https://localhost:8443` | Through WAF (NGINX + ModSecurity) |
-| **API docs** | `https://localhost:8443/api/v1/schema/swagger-ui/` | OpenAPI 3.0 UI |
+| **API docs** | `https://localhost:8443/api/docs/swagger-ui/` | OpenAPI 3.0 UI |
 | **Kibana** | `https://localhost:5601` | Must use `https://` — login: `elastic` / `<ELASTIC_PASSWORD>` |
 | **Elasticsearch** | `https://localhost:9200` | Basic auth required |
 

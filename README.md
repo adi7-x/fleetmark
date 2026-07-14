@@ -23,7 +23,7 @@
               |                           |
      +--------v-------+         +--------v--------+
      |  PostgreSQL 15 |         |   ELK Stack     |
-     |    :5432       |         | ES + Logstash   |
+     |  :5433 (host)  |         | ES + Logstash   |
      +----------------+         | + Kibana :5601  |
                                 +-----------------+
 ```
@@ -52,7 +52,7 @@ make up
 | Service | URL | Notes |
 |---------|-----|-------|
 | **App** | `https://localhost:8443` | Through WAF |
-| **API Docs** | `https://localhost:8443/api/v1/schema/swagger-ui/` | OpenAPI 3.0 |
+| **API Docs** | `https://localhost:8443/api/docs/swagger-ui/` | OpenAPI 3.0 |
 | **Kibana** | `https://localhost:5601` | ELK dashboards |
 
 ---
@@ -65,7 +65,7 @@ make up
 | **Mohamed Lahrech** (`mlahrech`) | Tech Lead / Backend | API design, reservation engine, data model |
 | **Aamir Tahtah** (`atahtah`) | Project Manager / DevOps | Docker (11 containers), ELK, WAF |
 | **Abderrahman Chakour** (`achakour`) | Backend Developer | 42 OAuth, JWT, HashiCorp Vault |
-| **Ayoub El Haouti** (`aelhaouti`) | QA Engineer | 86 automated tests, OpenAPI docs |
+| **Ayoub El Haouti** (`aelhaouti`) | QA Engineer | 52 automated tests, OpenAPI docs |
 
 ---
 
