@@ -217,8 +217,38 @@ class BulkDeleteTripsView(APIView):
 	permission_classes = [IsLogisticsStaff]
 
 	def delete(self, request):
-		try:
-			count, _ = Trip.objects.all().delete()
-			return Response({'detail': f'Deleted {count} trips.'}, status=status.HTTP_204_NO_CONTENT)
-		except Exception as e:
-			return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+		# Never wipe the whole table. Require an explicit confirmation flag AND
+		# an explicit scope — either a list of ids or a start_date/end_date range.
+		if request.data.get('confirm') is not True:
+			return Response(
+				{'detail': 'Refusing to delete: set "confirm": true.'},
+				status=status.HTTP_400_BAD_REQUEST,
+			)
+
+		ids = request.data.get('ids')
+		start_str = request.data.get('start_date')
+		end_str = request.data.get('end_date')
+
+		qs = Trip.objects.all()
+		if ids:
+			if not isinstance(ids, list):
+				return Response({'detail': '"ids" must be a list.'}, status=status.HTTP_400_BAD_REQUEST)
+			qs = qs.filter(id__in=ids)
+		elif start_str and end_str:
+			try:
+				start_date = datetime.strptime(start_str, '%Y-%m-%d').date()
+				end_date = datetime.strptime(end_str, '%Y-%m-%d').date()
+			except (ValueError, TypeError):
+				return Response({'detail': 'Invalid date format. Use YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
+			tz = get_current_timezone()
+			start_dt = make_aware(datetime.combine(start_date, time.min), tz)
+			end_dt = make_aware(datetime.combine(end_date, time.max), tz)
+			qs = qs.filter(departure_datetime__range=(start_dt, end_dt))
+		else:
+			return Response(
+				{'detail': 'Refusing unscoped delete: provide "ids" or "start_date" + "end_date".'},
+				status=status.HTTP_400_BAD_REQUEST,
+			)
+
+		count, _ = qs.delete()
+		return Response({'detail': f'Deleted {count} trips.'}, status=status.HTTP_200_OK)

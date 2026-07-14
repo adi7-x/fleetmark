@@ -1,11 +1,10 @@
 from django.apps import apps
 from rest_framework import generics, status
-from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from apps.stations.models import Station
 from apps.stations.serializers import StationSerializer
-from apps.users.permissions import IsLogisticsStaff
+from apps.users.permissions import HasAPIKeyOrIsAuthenticated, IsLogisticsStaff
 
 
 class StationListCreateView(generics.ListCreateAPIView):
@@ -14,7 +13,7 @@ class StationListCreateView(generics.ListCreateAPIView):
 
 	def get_permissions(self):
 		if self.request.method == 'GET':
-			return [IsAuthenticated()]
+			return [HasAPIKeyOrIsAuthenticated()]
 		return [IsLogisticsStaff()]
 
 
@@ -24,7 +23,7 @@ class StationDetailView(generics.RetrieveUpdateDestroyAPIView):
 
 	def get_permissions(self):
 		if self.request.method == 'GET':
-			return [IsAuthenticated()]
+			return [HasAPIKeyOrIsAuthenticated()]
 		return [IsLogisticsStaff()]
 
 	def delete(self, request, *args, **kwargs):

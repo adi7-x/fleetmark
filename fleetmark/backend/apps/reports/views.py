@@ -12,7 +12,7 @@ class IncidentReportViewSet(viewsets.ModelViewSet):
 
 	def get_queryset(self):
 		user = self.request.user
-		if user.role.upper() == STAFF_ROLE:
+		if getattr(user, 'role', None) == STAFF_ROLE:
 			return IncidentReport.objects.all()
 		return IncidentReport.objects.filter(reporter=user)
 
@@ -20,7 +20,7 @@ class IncidentReportViewSet(viewsets.ModelViewSet):
 		serializer.save(reporter=self.request.user)
 
 	def _check_staff(self, request):
-		if request.user.role.upper() != STAFF_ROLE:
+		if getattr(request.user, 'role', None) != STAFF_ROLE:
 			from rest_framework.response import Response as Resp
 			from rest_framework import status as st
 			return Resp(

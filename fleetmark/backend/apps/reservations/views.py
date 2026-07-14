@@ -10,6 +10,7 @@ from apps.core.exceptions import CapacityError, LifecycleError
 from apps.reservations.models import Reservation
 from apps.reservations.serializers import ReservationSerializer
 from apps.trips.models import Trip
+from apps.users.models import User
 
 def get_bus_day_bounds(dt):
 	local_dt = localtime(dt)
@@ -50,6 +51,12 @@ class ReservationListCreateView(APIView):
 
 		try:
 			with transaction.atomic():
+				# Lock this student's row for the duration of the transaction so
+				# concurrent reservation attempts are serialized. Without this the
+				# cross-trip "one reservation per night" check below is a
+				# check-then-insert race (two different trips, same night). (M5)
+				User.objects.select_for_update().get(pk=request.user.pk)
+
 				trip = Trip.objects.select_for_update().select_related('bus').get(id=trip_id)
 
 				if trip.archived_at is not None:

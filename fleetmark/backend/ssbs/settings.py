@@ -123,8 +123,10 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ],
+    # App default: an authenticated (JWT) session. The public API key is NOT a
+    # global gate — it is applied deliberately to the documented public
+    # endpoints via HasAPIKeyOrIsAuthenticated (see docs/PUBLIC_API.md).
     'DEFAULT_PERMISSION_CLASSES': [
-        'apps.users.permissions.HasAPIKey',
         'rest_framework.permissions.IsAuthenticated',
     ],
     'DEFAULT_THROTTLE_CLASSES': [

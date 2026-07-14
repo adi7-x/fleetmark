@@ -136,3 +136,35 @@ class TripAPITests(APITestCase):
 
 		self.assertEqual(response.status_code, status.HTTP_200_OK)
 		self.assertEqual(response.data, [])
+
+	# ── M4: BulkDeleteTripsView must never wipe the whole table ──────────────
+	def test_bulk_delete_requires_confirm(self):
+		self.client.force_authenticate(user=self.logistics_user)
+		trip = self._create_trip()
+		resp = self.client.delete(
+			reverse('trip-bulk-delete'), {'ids': [str(trip.id)]}, format='json'
+		)
+		self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertTrue(Trip.objects.filter(id=trip.id).exists())
+
+	def test_bulk_delete_rejects_unscoped(self):
+		self.client.force_authenticate(user=self.logistics_user)
+		self._create_trip()
+		resp = self.client.delete(
+			reverse('trip-bulk-delete'), {'confirm': True}, format='json'
+		)
+		self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(Trip.objects.count(), 1)
+
+	def test_bulk_delete_by_ids_with_confirm(self):
+		self.client.force_authenticate(user=self.logistics_user)
+		keep = self._create_trip()
+		drop = self._create_trip()
+		resp = self.client.delete(
+			reverse('trip-bulk-delete'),
+			{'confirm': True, 'ids': [str(drop.id)]},
+			format='json',
+		)
+		self.assertEqual(resp.status_code, status.HTTP_200_OK)
+		self.assertFalse(Trip.objects.filter(id=drop.id).exists())
+		self.assertTrue(Trip.objects.filter(id=keep.id).exists())

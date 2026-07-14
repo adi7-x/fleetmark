@@ -1,3 +1,4 @@
+import hmac
 import os
 
 from rest_framework.permissions import BasePermission
@@ -9,7 +10,24 @@ class HasAPIKey(BasePermission):
     def has_permission(self, request, view):
         api_key = request.headers.get('X-API-Key', '')
         expected_key = os.environ.get('SSBS_API_KEY', '')
-        return api_key and expected_key and api_key == expected_key
+        if not api_key or not expected_key:
+            return False
+        # Constant-time comparison to avoid leaking the key via timing.
+        return hmac.compare_digest(api_key, expected_key)
+
+
+class HasAPIKeyOrIsAuthenticated(BasePermission):
+    """Public-API access: a valid X-API-Key OR an authenticated session.
+
+    Applied to the documented read-only public endpoints (see docs/PUBLIC_API.md)
+    so external clients can authenticate with the API key while the browser SPA
+    continues to use its JWT.
+    """
+
+    def has_permission(self, request, view):
+        if HasAPIKey().has_permission(request, view):
+            return True
+        return bool(request.user and request.user.is_authenticated)
 
 
 class IsLogisticsStaff(BasePermission):

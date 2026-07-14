@@ -124,3 +124,19 @@ class ReservationAPITests(APITestCase):
 		url = reverse('reservation-detail', args=[reservation.id])
 		response = self.client.delete(url + f'?user_id={self.other_user.id}')
 		self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+	def test_one_reservation_per_night_across_trips(self):
+		"""M5: a student may hold only one reservation per bus-night, even on a
+		different trip in the same 21:00->06:00 window."""
+		trip_a = self._create_trip()  # departs 2026-01-01T22:00:00Z
+		trip_b = Trip.objects.create(
+			route=self.route,
+			bus=self.bus,
+			driver=self.driver,
+			departure_datetime='2026-01-02T01:00:00Z',  # same bus-night window
+		)
+		r1 = self.client.post(self.list_url, {'trip': str(trip_a.id)}, format='json')
+		self.assertEqual(r1.status_code, status.HTTP_201_CREATED)
+		r2 = self.client.post(self.list_url, {'trip': str(trip_b.id)}, format='json')
+		self.assertEqual(r2.status_code, status.HTTP_400_BAD_REQUEST)
+		self.assertEqual(Reservation.objects.filter(student=self.user).count(), 1)
