@@ -513,6 +513,7 @@ const translations = {
     srvArchiveFuture: "Only trips that have already departed can be archived. To cancel a future trip, delete it.",
     srvRootAdmin: "The main administrator account cannot be demoted or blocked.",
     bookedTonightDeparted: "You already took {{route}} at {{time}} tonight — one seat per night.",
+    srvTotpLocked: "Too many wrong codes. Try again in 15 minutes.",
   },
   fr: {
     // Navigation
@@ -1026,6 +1027,7 @@ const translations = {
     srvArchiveFuture: "Seuls les trajets déjà partis peuvent être archivés. Pour annuler un trajet futur, supprimez-le.",
     srvRootAdmin: "Le compte administrateur principal ne peut pas être rétrogradé ni bloqué.",
     bookedTonightDeparted: "Vous avez déjà pris {{route}} à {{time}} ce soir — une place par nuit.",
+    srvTotpLocked: "Trop de codes erronés. Réessayez dans 15 minutes.",
   },
 };
 

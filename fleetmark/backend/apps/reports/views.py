@@ -37,6 +37,13 @@ class IncidentReportViewSet(viewsets.ModelViewSet):
 		kwargs['partial'] = True  # always allow partial to avoid requiring all fields
 		return super().update(request, *args, **kwargs)
 
+	# Same gate as update: a student must not erase a report once filed.
+	def destroy(self, request, *args, **kwargs):
+		denied = self._check_staff(request)
+		if denied:
+			return denied
+		return super().destroy(request, *args, **kwargs)
+
 	def partial_update(self, request, *args, **kwargs):
 		denied = self._check_staff(request)
 		if denied:

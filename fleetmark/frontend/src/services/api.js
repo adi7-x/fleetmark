@@ -125,6 +125,7 @@ const SERVER_MESSAGES = {
   'This account has been deactivated.': 'srvDeactivated',
   'Only trips that have already departed can be archived.': 'srvArchiveFuture',
   'The main administrator account cannot be demoted or blocked.': 'srvRootAdmin',
+  'Too many wrong codes. Try again in 15 minutes.': 'srvTotpLocked',
 };
 const localise = (msg) => (SERVER_MESSAGES[msg] ? translate(SERVER_MESSAGES[msg]) : msg);
 

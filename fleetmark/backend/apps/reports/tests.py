@@ -107,3 +107,9 @@ class IncidentReportAPITests(TestCase):
         self.client.force_authenticate(user=self.student)
         response = self.client.post('/api/v1/reports/', {'category': 'late', 'status': 'resolved'}, format='json')
         self.assertEqual(IncidentReport.objects.get(id=response.data['id']).status, 'pending')
+
+    def test_student_cannot_delete_a_report(self):
+        self.client.force_authenticate(user=self.student)
+        rid = self.client.post('/api/v1/reports/', {'category': 'late'}, format='json').data['id']
+        self.assertEqual(self.client.delete(f'/api/v1/reports/{rid}/').status_code, status.HTTP_403_FORBIDDEN)
+        self.assertTrue(IncidentReport.objects.filter(id=rid).exists())

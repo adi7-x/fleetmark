@@ -519,3 +519,30 @@ class AccessRevocationTest(TestCase):
         client = APIClient()
         client.force_authenticate(user=staff)
         self.assertEqual(client.delete(f'/api/v1/auth/users/{staff.id}/').status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
+
+
+class TOTPAbuseTest(TestCase):
+    def setUp(self):
+        import pyotp
+        from django.core.cache import cache
+        cache.clear()
+        self.secret = pyotp.random_base32()
+        self.user = User.objects.create_user(email='t@test.com', password='x', login_42='totp1')
+        self.user.totp_secret = self.secret
+        self.user.save()
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.user)
+
+    def test_locks_after_five_wrong_codes(self):
+        for _ in range(5):
+            self.client.post('/api/v1/auth/2fa/verify/', {'code': '000000'}, format='json')
+        import pyotp
+        good = pyotp.TOTP(self.secret).now()
+        resp = self.client.post('/api/v1/auth/2fa/verify/', {'code': good}, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+
+    def test_a_code_cannot_be_used_twice(self):
+        import pyotp
+        good = pyotp.TOTP(self.secret).now()
+        self.assertEqual(self.client.post('/api/v1/auth/2fa/verify/', {'code': good}, format='json').status_code, 200)
+        self.assertEqual(self.client.post('/api/v1/auth/2fa/verify/', {'code': good}, format='json').status_code, 400)

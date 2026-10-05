@@ -415,6 +415,39 @@ class GDPRAccountDeleteView(APIView):
 # Two-Factor Authentication (TOTP)
 # ──────────────────────────────────────────────────────────────────────────────
 
+# A 6-digit code has only 10^6 values; without a per-account limit it can be
+# brute-forced from many IPs (the anon rate limit is per IP). After
+# TOTP_MAX_FAILURES wrong codes the account's 2FA checks are locked for
+# TOTP_LOCK_SECONDS, whichever endpoint or IP the attempts come from.
+# ponytail: default cache is per-process; use a shared cache (Redis/DB) if
+# the backend ever runs several workers.
+TOTP_MAX_FAILURES = 5
+TOTP_LOCK_SECONDS = 15 * 60
+
+
+def _check_totp(user, code):
+    """Returns None if the code is valid, else an error Response."""
+    import pyotp
+    from django.core.cache import cache
+
+    key = f'totp-failures:{user.pk}'
+    if cache.get(key, 0) >= TOTP_MAX_FAILURES:
+        return Response(
+            {'detail': 'Too many wrong codes. Try again in 15 minutes.'},
+            status=status.HTTP_429_TOO_MANY_REQUESTS,
+        )
+    if pyotp.TOTP(user.totp_secret).verify(str(code), valid_window=1):
+        # A code stays valid for up to 90 s (valid_window=1); accept each code once.
+        used_key = f'totp-used:{user.pk}:{code}'
+        if not cache.add(used_key, True, 90):
+            cache.set(key, cache.get(key, 0) + 1, TOTP_LOCK_SECONDS)
+            return Response({'detail': 'Invalid code.'}, status=status.HTTP_400_BAD_REQUEST)
+        cache.delete(key)
+        return None
+    cache.set(key, cache.get(key, 0) + 1, TOTP_LOCK_SECONDS)
+    return Response({'detail': 'Invalid code.'}, status=status.HTTP_400_BAD_REQUEST)
+
+
 class TOTPSetupView(APIView):
     """
     POST /api/v1/auth/2fa/setup/
@@ -481,12 +514,9 @@ class TOTPVerifyView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        totp = pyotp.TOTP(user.totp_secret)
-        if not totp.verify(code, valid_window=1):
-            return Response(
-                {'detail': 'Invalid code.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        denied = _check_totp(user, code)
+        if denied:
+            return denied
 
         if not user.totp_enabled:
             user.totp_enabled = True
@@ -517,12 +547,9 @@ class TOTPDisableView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        totp = pyotp.TOTP(user.totp_secret)
-        if not totp.verify(code, valid_window=1):
-            return Response(
-                {'detail': 'Invalid code.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        denied = _check_totp(user, code)
+        if denied:
+            return denied
 
         user.totp_secret = None
         user.totp_enabled = False
@@ -580,9 +607,12 @@ class TOTPLoginVerifyView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        totp = pyotp.TOTP(user.totp_secret)
-        if not totp.verify(code, valid_window=1):
-            return Response({'detail': 'Invalid code.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not user.is_active:
+            return Response({'detail': 'This account has been deactivated.'}, status=status.HTTP_403_FORBIDDEN)
+
+        denied = _check_totp(user, code)
+        if denied:
+            return denied
 
         refresh = RefreshToken.for_user(user)
         access_tok = str(refresh.access_token)
