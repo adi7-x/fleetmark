@@ -2,8 +2,10 @@ import React from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import FleetmarkLogo from "../../components/ui/FleetmarkLogo";
+import { useTranslation } from "../../context/TranslationContext";
 
 export default function ComingSoon() {
+  const { t } = useTranslation();
   const { logout } = useAuth();
   const navigate = useNavigate();
 
@@ -16,8 +18,8 @@ export default function ComingSoon() {
     <div style={{ minHeight: "100vh", background: "var(--bg)", color: "var(--ink)", display: "grid", placeItems: "center", padding: "var(--space-6)" }}>
       <section style={{ width: "100%", maxWidth: 700, border: "1px solid var(--line2)", borderRadius: "var(--radius-lg)", background: "var(--surface)", padding: "var(--space-8)", textAlign: "center" }}>
         <FleetmarkLogo size="lg" />
-        <h1 style={{ fontSize: 44, marginBottom: "var(--space-3)" }}>Driver Portal</h1>
-        <p className="mono" style={{ color: "var(--mid)", margin: "0 0 var(--space-6)" }}>Coming soon. Driver workflow screens will be activated in a later release.</p>
+        <h1 style={{ fontSize: 44, marginBottom: "var(--space-3)" }}>{t("driverPortal")}</h1>
+        <p className="mono" style={{ color: "var(--mid)", margin: "0 0 var(--space-6)" }}>{t("driverComingSoon")}</p>
         <button
           type="button"
           onClick={handleLogout}
@@ -35,7 +37,7 @@ export default function ComingSoon() {
             gap: 8,
           }}
         >
-          Sign out
+          {t("signOut")}
         </button>
       </section>
     </div>

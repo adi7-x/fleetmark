@@ -1,7 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import EmptyState from "../../components/ui/EmptyState";
 import ReportModal from "../../components/ui/ReportModal";
-import { API_BASE, getUser } from "../../services/api";
+import { useNavigate } from "react-router-dom";
+import { API_BASE, authFetch, errorMessage } from "../../services/api";
+import { useTranslation } from "../../context/TranslationContext";
+import { fmtDateTime } from "../../utils/datetime";
 
 function ReservationsSkeleton() {
   return (
@@ -23,7 +26,8 @@ function ReservationsSkeleton() {
 
 
 export default function MyReservations() {
-  const user = useMemo(() => getUser(), []);
+  const { t } = useTranslation();
+  const navigate = useNavigate();
   const [tab, setTab] = useState("upcoming");
   const [upcoming, setUpcoming] = useState([]);
   const [past, setPast] = useState([]);
@@ -31,30 +35,38 @@ export default function MyReservations() {
   const [error, setError] = useState("");
   const [confirmCancel, setConfirmCancel] = useState(null);
   const [reportingTrip, setReportingTrip] = useState(null);
+  const [notice, setNotice] = useState("");
 
   const load = useCallback(async () => {
     try {
       setLoading(true);
       setError("");
-      const token = localStorage.getItem("fleetmark_access");
       const [uRes, pRes] = await Promise.all([
-        fetch(`${API_BASE}/reservations/?user_id=${encodeURIComponent(user.id)}`, { headers: { Authorization: `Bearer ${token}`, "X-API-Key": import.meta.env.VITE_API_KEY } }),
-        fetch(`${API_BASE}/reservations/history/?user_id=${encodeURIComponent(user.id)}`, { headers: { Authorization: `Bearer ${token}`, "X-API-Key": import.meta.env.VITE_API_KEY } }),
+        authFetch(`${API_BASE}/reservations/`),
+        authFetch(`${API_BASE}/reservations/history/`),
       ]);
-      if (!uRes.ok || !pRes.ok) throw new Error("Failed to load reservations.");
+      if (!uRes.ok || !pRes.ok) throw new Error(t("couldntLoad"));
       const [uData, pData] = await Promise.all([uRes.json(), pRes.json()]);
-      setUpcoming(Array.isArray(uData) ? uData : []);
-      setPast(Array.isArray(pData) ? pData : []);
+      const byDeparture = (a, b) => new Date(a.trip_details?.departure_datetime) - new Date(b.trip_details?.departure_datetime);
+      setUpcoming((Array.isArray(uData) ? uData : []).sort(byDeparture));
+      setPast((Array.isArray(pData) ? pData : []).sort((a, b) => byDeparture(b, a)));
     } catch (err) {
-      setError(err.message || "Unable to load reservations.");
+      setError(err.message || t("couldntLoad"));
     } finally {
       setLoading(false);
     }
-  }, [user?.id]);
+  }, [t]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (!confirmCancel) return undefined;
+    const onKey = (e) => e.key === "Escape" && setConfirmCancel(null);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [confirmCancel]);
 
   // Listen for header refresh button
   useEffect(() => {
@@ -63,23 +75,21 @@ export default function MyReservations() {
   }, [load]);
 
   async function cancelReservation(id) {
+    setConfirmCancel(null);
     try {
-      const token = localStorage.getItem("fleetmark_access");
-      const res = await fetch(`${API_BASE}/reservations/${id}/?user_id=${encodeURIComponent(user.id)}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}`, "X-API-Key": import.meta.env.VITE_API_KEY },
-      });
-      if (!res.ok) throw new Error("Unable to cancel reservation.");
+      const res = await authFetch(`${API_BASE}/reservations/${id}/`, { method: "DELETE" });
+      if (!res.ok) throw new Error(await errorMessage(res, t("cancelFailed")));
       setUpcoming((prev) => prev.filter((item) => item.id !== id));
-      setConfirmCancel(null);
+      setNotice(t("cancelDone"));
+      setTimeout(() => setNotice(""), 4000);
     } catch (err) {
-      setError(err.message || "Unable to cancel reservation.");
+      setError(err.message || t("cancelFailed"));
     }
   }
 
   const current = tab === "upcoming" ? upcoming : past;
   if (loading) return <ReservationsSkeleton />;
-  if (error && !current.length) return <EmptyState icon="⚠️" title="Reservations unavailable" subtitle={error} />;
+  if (error && !upcoming.length && !past.length) return <EmptyState icon="cloud_off" title={t("couldntLoad")} subtitle={error} />;
 
   return (
     <div className="animate-in" style={{ display: "grid", gap: "var(--space-4)" }}>
@@ -89,7 +99,8 @@ export default function MyReservations() {
           onClose={() => setReportingTrip(null)} 
           onExpectedSuccess={() => {
             setReportingTrip(null);
-            alert("Report submitted successfully.");
+            setNotice(t("reportSent"));
+            setTimeout(() => setNotice(""), 4000);
           }} 
         />
       )}
@@ -98,13 +109,14 @@ export default function MyReservations() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div style={{ display: "inline-flex", border: "1px solid var(--line2)", borderRadius: "999px", overflow: "hidden" }}>
           {[
-            ["upcoming", `Upcoming (${upcoming.length})`],
-            ["past", `Past (${past.length})`],
+            ["upcoming", `${t("tabUpcoming")} (${upcoming.length})`],
+            ["past", `${t("tabPast")} (${past.length})`],
           ].map(([id, label]) => (
             <button
               key={id}
               type="button"
               onClick={() => setTab(id)}
+              aria-pressed={tab === id}
               style={{
                 border: "none",
                 padding: "9px 14px",
@@ -121,6 +133,8 @@ export default function MyReservations() {
         <button
           type="button"
           onClick={load}
+          aria-label={t("refresh")}
+          title={t("refresh")}
           style={{
             border: "1px solid var(--line2)",
             background: "var(--surface)",
@@ -137,7 +151,8 @@ export default function MyReservations() {
         </button>
       </div>
 
-      {error ? <p style={{ color: "var(--red)", margin: 0 }}>{error}</p> : null}
+      {notice ? <p role="status" style={{ color: "var(--green)", margin: 0, fontWeight: 600 }}>{notice}</p> : null}
+      {error ? <p role="alert" style={{ color: "var(--red)", margin: 0 }}>{error}</p> : null}
 
       {!current.length ? (
         <div
@@ -153,18 +168,18 @@ export default function MyReservations() {
           }}
         >
           <div style={{ width: 48, height: 48, borderRadius: "50%", background: "var(--surface2)", display: "grid", placeItems: "center" }}>
-            <span style={{ fontSize: "1.4rem", lineHeight: 1 }}>🎫</span>
+            <span className="material-symbols-outlined" style={{ fontSize: 24, color: "var(--dim)" }}>confirmation_number</span>
           </div>
           <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>
-            {tab === "upcoming" ? "No upcoming reservations" : "No past reservations"}
+            {tab === "upcoming" ? t("noUpcomingTitle") : t("noPastTitle")}
           </h3>
           <p style={{ margin: 0, fontSize: 13, color: "var(--mid)", maxWidth: 300 }}>
-            {tab === "upcoming" ? "Book a seat to secure your spot on the next shuttle." : "Your completed rides will appear here."}
+            {tab === "upcoming" ? t("noUpcomingDesc") : t("noPastDesc")}
           </p>
           {tab === "upcoming" && (
             <button
               type="button"
-              onClick={() => window.location.href = "/passenger/reserve"}
+              onClick={() => navigate("/passenger/reserve")}
               style={{
                 border: "1px solid var(--blue-border, var(--blue))",
                 background: "var(--blue-light)",
@@ -177,19 +192,21 @@ export default function MyReservations() {
                 marginTop: 6,
               }}
             >
-              Book a Seat →
+              {t("quickBookSeat")} →
             </button>
           )}
         </div>
       ) : (
         current.map((item) => {
           const departure = item.trip_details?.departure_datetime || null;
+          const departed = departure && new Date(departure) < new Date();
           return (
             <article key={item.id} style={{ border: "1px solid var(--line2)", borderRadius: "var(--radius-md)", background: "var(--surface)", padding: "var(--space-5)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "var(--space-4)" }}>
               <div>
-                <h3 style={{ margin: 0 }}>{item.trip_details?.route_name || "Trip"}</h3>
+                <h3 style={{ margin: 0 }}>{item.trip_details?.route_name}</h3>
                 <p className="mono" style={{ margin: "var(--space-2) 0 0", color: "var(--mid)" }}>
-                  {departure ? new Date(departure).toLocaleString() : "Time not available"}
+                  {departure ? fmtDateTime(departure) : "—"}
+                  {item.trip_details?.bus_name ? ` · ${item.trip_details.bus_name}` : ""}
                 </p>
               </div>
               <div style={{ display: "flex", gap: 8 }}>
@@ -203,9 +220,9 @@ export default function MyReservations() {
                   }}
                 >
                   <span className="material-symbols-outlined" style={{ fontSize: 14 }}>report</span>
-                  Report
+                  {t("reportIssue")}
                 </button>
-              {tab === "upcoming" ? (
+              {tab === "upcoming" && !departed ? (
                 <button
                   type="button"
                   onClick={() => setConfirmCancel(item)}
@@ -219,7 +236,7 @@ export default function MyReservations() {
                     fontWeight: 700,
                   }}
                 >
-                  Cancel
+                  {t("cancel")}
                 </button>
               ) : null}
               </div>
@@ -230,19 +247,18 @@ export default function MyReservations() {
 
       {/* Cancel Confirmation Modal */}
       {confirmCancel ? (
-        <div className="modal-backdrop-anim" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "grid", placeItems: "center", zIndex: 20 }}>
-          <div style={{ width: "min(420px,90vw)", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-md)", padding: "var(--space-6)", display: "grid", gap: "var(--space-4)" }}>
-            <h3 style={{ margin: 0 }}>Cancel Reservation</h3>
+        <div className="modal-backdrop-anim" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "grid", placeItems: "center", zIndex: 1000 }}>
+          <div role="dialog" aria-modal="true" style={{ width: "min(420px,90vw)", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-md)", padding: "var(--space-6)", display: "grid", gap: "var(--space-4)" }}>
+            <h3 style={{ margin: 0 }}>{t("cancelTitle")}</h3>
             <p style={{ margin: 0, color: "var(--mid)" }}>
-              Are you sure you want to cancel your reservation for <strong>{confirmCancel.trip_details?.route_name || "this trip"}</strong>?
-              Your seat will be released.
+              {t("cancelConfirm").replace("{{route}}", confirmCancel.trip_details?.route_name || "").replace("{{time}}", confirmCancel.trip_details ? fmtDateTime(confirmCancel.trip_details.departure_datetime) : "")}
             </p>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
               <button type="button" onClick={() => setConfirmCancel(null)} style={{ border: "1px solid var(--line)", background: "var(--surface2)", color: "var(--ink)", borderRadius: 8, padding: "9px 12px", cursor: "pointer" }}>
-                Keep
+                {t("keepSeat")}
               </button>
               <button type="button" onClick={() => cancelReservation(confirmCancel.id)} style={{ border: "1px solid color-mix(in srgb, var(--red) 40%, transparent)", background: "var(--red-bg)", color: "var(--red)", borderRadius: 8, padding: "9px 12px", fontWeight: 700, cursor: "pointer" }}>
-                Cancel Reservation
+                {t("cancelReservation")}
               </button>
             </div>
           </div>

@@ -5,7 +5,7 @@
 
 .PHONY: build up up-build down restart logs logs-backend logs-cron logs-frontend \
         shell-be shell-fe db migrate seed clean prune help \
-        scaffold-project scaffold-app scaffold-frontend ssl
+        scaffold-project scaffold-app scaffold-frontend ssl elk-up elk-down
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Docker Compose Commands
@@ -37,6 +37,16 @@ up-build: ssl
 ## Stop all services
 down:
 	docker compose down
+
+## Start the ELK observability stack (opt-in — Elasticsearch is memory-hungry
+## and not needed to run or evaluate the core app). TLS certs are generated
+## automatically on first run by the elk-cert-init container.
+elk-up:
+	docker compose --profile observability up -d elk-cert-init elasticsearch kibana logstash elk-setup
+
+## Stop the ELK observability stack
+elk-down:
+	docker compose --profile observability stop elasticsearch kibana logstash elk-setup elk-cert-init
 
 ## Restart all services
 restart:
@@ -148,6 +158,8 @@ help:
 	@echo "  up-build      Start all services with build"
 	@echo "  down          Stop all services"
 	@echo "  restart       Restart all services"
+	@echo "  elk-up        Start the ELK observability stack (opt-in, generates its own TLS certs)"
+	@echo "  elk-down      Stop the ELK observability stack"
 	@echo ""
 	@echo "Logs:"
 	@echo "  logs          View all logs"

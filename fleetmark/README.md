@@ -1,285 +1,269 @@
-*This project has been created as part of the 42 curriculum by aabourji, mlahrech, atahtah, achakour, aelhaouti.*
+*This project has been created as part of the 42 curriculum by adbourji, mlahrech, atahtah, achakour, aelhaouti.*
 
-# Fleetmark — Smart School Bus System (SSBS)
+# FleetMark (SSBS) — Technical documentation
 
-> **Night shuttle reservation platform for 1337 School, Ben Guerir, Morocco.**
+> A night-shuttle seat-booking app built by five students at 1337 School (Ben Guerir, Morocco) as their 42 `ft_transcendence` project. It is a **student project and portfolio piece, not an official 1337 service.**
 
-Fleetmark lets students log in with their 42 Intra credentials, choose a home station, and reserve seats on night-time shuttle buses that run from **21:00 to 06:00** every night.
-
-Built as a [42 School](https://42.fr) `ft_transcendence`-scope project by five 1337 students.
+This file is the detailed technical reference. For the overview, screenshots, setup steps and troubleshooting, see the [root README](../README.md).
 
 ---
 
 ## Description
 
-Fleetmark is a full-stack web application that digitizes shuttle bus management for 1337 School. Students can authenticate via 42 Intra OAuth, select their departure station, browse active trips, and reserve seats — with the platform enforcing real-time capacity constraints. Logistics staff have a full administration portal to manage routes, buses, drivers, trips, and announcements. The system runs 24/7 in Docker, secured behind a ModSecurity WAF, with secrets managed by HashiCorp Vault and all events indexed into an ELK stack.
+Students log in with their 42 Intra account, choose a home stop and reserve one seat on a night shuttle. The shuttles run from **21:00 to 06:00**, with no 02:00 departure. Logistics staff use an admin portal to manage buses, stations, routes, drivers, trips, announcements, incident reports and user roles.
 
-**Key features:**
-- 42 OAuth 2.0 single sign-on with TOTP two-factor authentication
-- Seat reservation with overbooking prevention
-- Admin portal: fleet, routes (drag-and-drop ordering), drivers, trips, analytics charts
-- Announcement system with priority levels (info / warning / urgent)
-- Multi-language UI: English, French, Arabic (full RTL layout)
-- GDPR self-service: data export and account deletion
-- Privacy Policy and Terms of Service pages
+The stack runs in Docker Compose behind an NGINX + ModSecurity WAF. Secrets are stored in HashiCorp Vault. An ELK stack for log management can be started separately (it is opt-in).
+
+**Key features**
+- 42 OAuth 2.0 login, with optional TOTP two-factor authentication enforced on the server
+- One seat per student per service night, with overbooking prevented in a locked transaction
+- Trips filtered by the student's stop; trip status shows the ordered stops (there is no GPS)
+- Admin portal: night dashboard with charts, trips (with a schedule generator, archiving and bulk delete), buses, stations, routes with ordered stops, drivers, reservation search, reports, announcements, users and roles
+- Announcements with priority levels (info, warning, urgent)
+- English and French UI, dark and light themes, responsive layout
+- GDPR self-service: data export and account anonymisation, plus Privacy Policy and Terms pages
 
 ---
 
-## 1. Team Members & Roles
+## 1. Team members and roles
 
-| Name | Role | Core Responsibility |
+| Name | Role | Core responsibility |
 |------|------|--------------------|
-| **Adil Bourji** (`aabourji`) | Product Owner / Frontend Lead | Product vision, React SPA architecture, custom design system, UX/UI |
-| **Mohamed Lahrech** (`mlahrech`) | Tech Lead / Backend | System architecture, API design, reservation & trip logic (Django) |
-| **Aamir Tahtah** (`atahtah`) | Project Manager / DevOps | Docker infrastructure, ELK logging, WAF, CI/CD |
+| **Adil Bourji** (`adbourji`) | Product Owner / Frontend Lead | Product vision, React SPA architecture, custom design system, UX/UI |
+| **Mohamed Lahrech** (`mlahrech`) | Tech Lead / Backend | System architecture, API design, reservation and trip logic (Django) |
+| **Aamir Tahtah** (`atahtah`) | Project Manager / DevOps | Docker infrastructure, ELK logging, WAF |
 | **Abderrahman Chakour** (`achakour`) | Backend Developer | 42 OAuth, JWT auth, permissions, HashiCorp Vault |
-| **Ayoub El Haouti** (`aelhaouti`) | QA Engineer / Backend | Automated tests (52/52 passing), API reliability, endpoints |
+| **Ayoub El Haouti** (`aelhaouti`) | QA Engineer / Backend | Automated tests, API reliability, OpenAPI docs |
 
 ---
 
-## 2. Project Management
+## 2. Project management
 
-- **Task distribution**: work divided into sprints tracked via GitHub Issues and a shared Notion board.
-- **Meetings**: weekly sync every Monday to review progress and plan the next sprint.
-- **Communication**: Discord server with dedicated channels (#backend, #frontend, #devops, #reviews).
-- **Code reviews**: all PRs required at least one teammate approval before merging.
+- **Task distribution:** work was split into sprints and tracked with GitHub Issues and a shared Notion board.
+- **Meetings:** a weekly sync every Monday to review progress and plan the next sprint.
+- **Communication:** a Discord server with channels for backend, frontend, devops and reviews.
+- **Code reviews:** every PR needed at least one teammate's approval before merging.
 
 ---
 
-## 3. Technical Stack
+## 3. Technical stack
 
 ### Frontend
-- **React 19 & Vite 7**: component-based SPA with extremely fast HMR and build times.
-- **Vanilla CSS with custom properties**: full design token system (color palette, typography, spacing); no heavy UI library dependency. Complete light/dark mode via CSS variables.
-- **dnd-kit**: drag-and-drop route station sequencing in the admin portal.
-- **Recharts**: BarChart and PieChart for analytics in the admin dashboard.
+- **React 19 and Vite 7:** a single-page app with React Router 7.
+- **Plain CSS with custom properties:** a token system (colours, type, spacing) and reusable components in `src/components/ui`. No UI library. Dark and light themes are switched with CSS variables.
+- **Recharts:** bar and pie charts on the staff dashboard.
+- **Custom i18n:** `TranslationContext` with English and French dictionaries.
 
 ### Backend
-- **Django 4.2+ & Django REST Framework (DRF)**: secure ORM-driven framework with class-based views, serializers, and permission classes for the complex relational model.
-- **SimpleJWT**: stateless, standard-compliant JWT access/refresh token authentication.
-- **pyotp + qrcode**: TOTP-based two-factor authentication (setup / verify / disable).
-- **drf-spectacular**: OpenAPI 3.0 schema generation and interactive API documentation.
+- **Django and Django REST Framework.** `requirements.txt` pins `Django>=4.2`. The current image resolves to Django 5.2 and DRF 3.18.
+- **SimpleJWT:** access tokens (60 min) and refresh tokens (7 days). The refresh token is sent as an HttpOnly cookie.
+- **pyotp and qrcode:** TOTP setup (an SVG QR code), verification, disabling, and a verification step at login.
+- **drf-spectacular:** the OpenAPI 3 schema, plus Swagger UI and ReDoc.
+- **hvac:** reads secrets from Vault through AppRole.
 
-### Infrastructure & Security
-- **PostgreSQL 15**: ACID-compliant relational database for reservation integrity.
-- **Docker Compose**: 11-container orchestration with health checks and dependency ordering, single-command deployment (`make up`).
-- **HashiCorp Vault**: AppRole-based secrets management — no hardcoded credentials anywhere.
-- **ModSecurity + NGINX (WAF)**: CRS ruleset protecting against SQLi, XSS, and DDoS.
-- **ELK Stack**: Logstash pipeline → Elasticsearch indexing → Kibana dashboards for centralized log analytics.
+### Infrastructure and security
+- **PostgreSQL 15.**
+- **Docker Compose:** `db`, `vault`, `vault-init`, `backend`, `cron`, `frontend` and `waf` by default. The ELK services (`elk-cert-init`, `elasticsearch`, `logstash`, `kibana`, `elk-setup`) run only under the `observability` profile.
+- **HashiCorp Vault:** `vault-init` initialises and unseals Vault, then copies secrets from `.env` into KV v2. Django settings read the database credentials and `SECRET_KEY` through AppRole and fall back to environment variables. The OAuth views and the API-key permission still read `INTRA_42_*`, `ADMIN_42_LOGIN` and `SSBS_API_KEY` directly from the environment.
+- **ModSecurity + NGINX (WAF):** the OWASP CRS ruleset at paranoia level 2, plus custom rules. It is the single HTTPS entry point on port 8443.
+- **ELK stack (opt-in):** Logstash reads the backend log files and ships them to Elasticsearch. Kibana visualises them. TLS certificates are generated by `elk-cert-init`.
 
 ---
 
-## 4. Database Schema
+## 4. Database schema
 
-| Table | Key Fields |
+| Table | Key fields |
 |-------|-----------|
-| **Users** | `id`, `login_42`, `email`, `role` (STUDENT/LOGISTICS_STAFF/DRIVER), `station_id` FK, `is_active`, `totp_secret`, `totp_enabled` |
-| **Stations** | `id`, `name`, `created_at` |
-| **Buses** | `id`, `name`, `plate`, `seat_capacity` |
-| **Drivers** | `id`, `name`, `username`, `password` (hashed), `status`, `default_bus_id` FK |
-| **Routes** | `id`, `name`, `window` (peak/consolidated) |
-| **RouteStations** | Join table — `route_id` FK, `station_id` FK, `order` INT |
-| **Trips** | `id`, `route_id` FK, `bus_id` FK, `driver_id` FK, `departure_datetime`, `archived_at` |
-| **Reservations** | `id`, `trip_id` FK, `student_id` FK, `created_at` |
-| **Announcements** | `id`, `title`, `message`, `priority` (info/warning/urgent) |
-| **IncidentReports** | `id`, `reporter_id` FK, `trip_id` FK, `category`, `status`, `description` |
+| **User** | `id` (UUID), `login_42`, `email`, `role` (STUDENT / LOGISTICS_STAFF / DRIVER), `station` FK, `is_active`, `totp_secret`, `totp_enabled`, `avatar_url` |
+| **Station** | `id`, `name` |
+| **Bus** | `id`, `name`, `plate`, `seat_capacity` |
+| **Driver** | `id`, `name`, `username`, `password` (hashed), `status`, `default_bus` FK, `default_routes` M2M. This is a fleet record, not a login account. |
+| **Route** | `id`, `name`, `window` (peak / consolidated) |
+| **RouteStation** | `route` FK, `station` FK, `order`. Unique on (route, order) and (route, station). |
+| **Trip** | `id`, `route` FK, `bus` FK, `driver` FK, `departure_datetime`, `archived_at`. The foreign keys use PROTECT. |
+| **Reservation** | `id`, `trip` FK, `student` FK, `created_at`. Unique on (trip, student). |
+| **Announcement** | `id`, `title`, `message`, `priority` (info / warning / urgent) |
+| **AnnouncementDismissal** | `user` FK, `announcement` FK, `dismissed_at`. Unique on (user, announcement). |
+| **IncidentReport** | `id`, `reporter` FK, `trip` FK (nullable), `category`, `description`, `status` (pending / resolved) |
+
+There is an ERD in [docs/diagrams/ARCHITECTURE.md](../docs/diagrams/ARCHITECTURE.md#4-data-model--erd).
 
 ---
 
-## 5. Features List
+## 5. Booking rules (as implemented)
+
+- **Service night:** from 21:00 to 06:00 the next morning (`Africa/Casablanca`). Before 06:00 the current night is the previous evening's.
+- **Departure hours:** 21, 22, 23, 00, 01, 03, 04, 05 and 06. The trip serializer rejects any other hour. The minutes are not checked, so a manually created trip may leave at, for example, 21:30. At peak hours (21:00, 22:00, 01:00) the generator creates two trips, one on the OCP route and one on the Coin Blue route. At the other hours it creates one trip on the unified route.
+- **Available trips** (`GET /trips/available/?station_id=`): tonight's trips that serve the station, have not departed or been archived, and have free seats.
+- **Reserving** (`POST /reservations/`): runs in a transaction that locks the student's row and the trip's row. It rejects archived trips, full buses and a second reservation in the same service night. It does not check the departure time: only the available-trips list hides departed trips. The student is always the logged-in user.
+- **Cancelling** (`DELETE /reservations/{id}/`): students can cancel their own reservations, staff can cancel any. Neither works once the trip is archived.
+- **Archiving:** the `cron` container runs `archive_trips` every 60 seconds. It archives trips that departed more than 25 minutes ago and have at least one reservation. Staff can also archive a trip by hand, but only after it has departed.
+
+---
+
+## 6. API overview
+
+All endpoints are under `/api/v1/`. Unless noted otherwise, they require a JWT (`Authorization: Bearer`). The full schema is at `/api/schema/`. Swagger UI is at `/api/docs/swagger-ui/` and ReDoc at `/api/docs/redoc/`.
+
+| Area | Endpoints | Access |
+|---|---|---|
+| Auth | `auth/42/login/`, `auth/42/callback/`, `auth/token/refresh/` (reads the cookie), `auth/logout/` | Public |
+| 2FA | `auth/2fa/setup/`, `auth/2fa/verify/`, `auth/2fa/disable/` | Logged-in user |
+| 2FA login | `auth/2fa/login-verify/` (pre-auth token + code) | Public |
+| Profile and GDPR | `auth/me/` (GET, PATCH), `auth/me/export/`, `auth/me/delete/` | Logged-in user |
+| Users | `auth/users/`, `auth/users/{id}/` (GET, PATCH; no DELETE) | Staff |
+| Stations, routes | list and detail | GET with an **API key** or JWT. Writes are staff only. |
+| Buses | list and detail | GET for any logged-in user. Writes are staff only. |
+| Drivers | list and detail | Staff |
+| Trips | `trips/`, `trips/{id}/`, `trips/bulk-generate/`, `trips/bulk-delete/` | Staff |
+| Trips (student) | `trips/available/?station_id=` | Logged-in user |
+| Reservations | `reservations/`, `reservations/{id}/`, `reservations/history/` | Students see their own, staff see all |
+| Reservation search | `reservations/search/?login=&date_from=&date_to=` | Staff |
+| Reports | `reports/` (ModelViewSet) | Students see their own reports. Only staff can change a report's status. |
+| Announcements | `announcements/`, `announcements/{id}/`, `announcements/{id}/dismiss/` | Logged-in users can read and dismiss. Staff can create and delete. |
+
+The public API key (`X-API-Key`) is **read-only** and covers only stations and routes. See [docs/PUBLIC_API.md](../docs/PUBLIC_API.md).
+
+---
+
+## 7. Features list
 
 | Feature | Owner | Description |
 |---------|-------|-------------|
-| 42 OAuth login | Abderrahman Chakour | Full OAuth 2.0 handshake with 42 Intra; JWT tokens issued on callback |
-| TOTP 2FA | Abderrahman Chakour | pyotp TOTP setup (QR code), verify gate on login, disable flow |
-| User profile & station selection | Mohamed Lahrech | Profile edit, home station picker, reservation history |
-| GDPR self-service | Adil Bourji | Export personal data (JSON) and account deletion with confirm dialog |
-| Trip browsing & seat reservation | Mohamed Lahrech | Real-time capacity check; atomic reservation to prevent overbooking |
-| Automatic trip archiving | Mohamed Lahrech | Cron job archives past trips nightly |
-| Admin: fleet management | Adil Bourji | CRUD for buses and drivers |
-| Admin: route builder | Adil Bourji | Drag-and-drop station ordering via dnd-kit |
-| Admin: trip generation | Adil Bourji | Assign bus + driver to route with datetime picker |
-| Admin: analytics dashboard | Adil Bourji | Recharts BarChart (seat occupancy) + PieChart (reservations by route) |
-| Announcement system | Mohamed Lahrech | Post/dismiss announcements with priority levels; bell badge for unread |
-| Incident reports | Ayoub El Haouti | Passengers file reports; admin reviews and resolves |
-| Multi-language UI (EN/FR/AR) | Adil Bourji | Custom i18n context; full Arabic RTL layout via CSS `[data-lang]` |
-| HashiCorp Vault secrets | Abderrahman Chakour | AppRole auth; Django reads DB credentials from Vault at startup |
-| WAF / ModSecurity | Aamir Tahtah | NGINX reverse proxy with CRS ruleset; custom rules for API paths |
-| ELK logging pipeline | Aamir Tahtah | Logstash reads NGINX & Django logs, ships to Elasticsearch; Kibana UI |
-| OpenAPI / Public API | Ayoub El Haouti | drf-spectacular docs; X-API-Key authentication; full CRUD endpoints |
-| Automated test suite | Ayoub El Haouti | 52 passing tests across all apps (buses, trips, reservations, users…) |
+| 42 OAuth login | Abderrahman Chakour | Authorization-code flow with a CSRF `state` cookie. The access token is kept in memory and the refresh token in an HttpOnly cookie. |
+| TOTP 2FA | Abderrahman Chakour | Setup with a QR code, then verify and disable. **Enforced on the server at login:** the callback issues only a 5-minute pre-auth token until a valid code is submitted. |
+| Profile and home stop | Mohamed Lahrech | Home stop chosen at onboarding and changeable in settings; reservation history |
+| GDPR self-service | Adil Bourji | JSON data export; account anonymisation and deactivation behind a confirmation dialog |
+| Trip browsing and booking | Mohamed Lahrech | Trips filtered by stop; one seat per night; overbooking prevented with row locks |
+| Trip status | Adil Bourji | The booked trip's scheduled departure and its ordered stops. No GPS. |
+| Automatic trip archiving | Mohamed Lahrech | Cron loop every 60 s that archives trips 25 minutes after departure |
+| Admin: fleet | Adil Bourji | CRUD for buses, stations and drivers |
+| Admin: routes | Adil Bourji | Routes with ordered stops; the order is the order in which stops are selected |
+| Admin: trips | Adil Bourji | Trip CRUD, a weekly or custom-dates schedule generator, archiving of departed trips, and bulk delete of the listed trips |
+| Admin: dashboard | Adil Bourji | Tonight's trips and seats, an occupancy bar chart and a reservations-by-route pie chart (Recharts) |
+| Admin: users and roles | Adil Bourji | Promote or demote staff, block or unblock accounts |
+| Announcements | Mohamed Lahrech | Priority levels, an unread badge and per-user dismissal |
+| Incident reports | Ayoub El Haouti | Students file reports; staff review and resolve them |
+| EN/FR UI | Adil Bourji | Custom i18n context and a language switcher in every layout |
+| Vault secrets | Abderrahman Chakour | AppRole auth. Django settings read the database credentials and `SECRET_KEY` from Vault at startup. |
+| WAF / ModSecurity | Aamir Tahtah | NGINX reverse proxy with OWASP CRS and custom rules |
+| ELK logging | Aamir Tahtah | Logstash → Elasticsearch → Kibana, opt-in |
+| OpenAPI / public API | Ayoub El Haouti | drf-spectacular docs; read-only `X-API-Key` access to stations and routes |
+| Automated tests | Ayoub El Haouti | 86 backend tests (Django) and 23 frontend tests (Vitest + Testing Library) |
 
 ---
 
-## 6. Modules — Points Calculation
+## 8. Modules
 
-**Subject scoring: Major module = 2 pts · Minor module = 1 pt · Minimum required = 14 pts**
+The module table and the points breakdown are in the [root README](../README.md#ft_transcendence-modules). It lists 5 major and 8 minor modules, for 18 points claimed. Two of them are only partly implemented: the public API (its API key is read-only and covers 4 endpoints) and multi-language support (English and French only). Without those two, the total is 15 points.
 
-> Note: "Support Multiple Devices" (responsive) and "SSL/HTTPS" are **mandatory technical requirements** in the subject, not scorable modules. WAF + Vault is **one combined Major** per subject §IV.5.
-
-| # | Module Name | Category | Type | Pts | Implementation | Owner |
-|---|-------------|----------|------|-----|----------------|-------|
-| 1 | **Use a Framework as both frontend AND backend** | Web | **Major** | **2** | React 19 (Vite SPA) + Django 4.2 / DRF | Adil + Mohamed |
-| 2 | **Use an ORM for the database** | Web | Minor | 1 | Django ORM with PostgreSQL 15; full model coverage verified via automated test suite (52/52) | Mohamed + Ayoub |
-| 3 | **Public API** (API key + rate-limit + OpenAPI docs + 5 endpoints) | Web | **Major** | **2** | drf-spectacular, `X-API-Key` header auth, GET/POST/PUT/DELETE/PATCH routes | Ayoub |
-| 4 | **Notification / Announcement System** | Web | Minor | 1 | Priority announcements (info/warning/urgent), dismiss tracking, bell badge | Mohamed |
-| 5 | **Custom Design System** | Web | Minor | 1 | 20+ reusable components (Button, Card, Modal, Badge, Input, Select, DataTable, Spinner, EmptyState, PageHeader…) + full CSS token system | Adil |
-| 6 | **Multiple Language Support** (EN / FR / AR) | Accessibility | Minor | 1 | Custom `TranslationContext` i18n with 3 complete translations; language switcher in all layouts | Adil |
-| 7 | **RTL Language Support** (Arabic) | Accessibility | Minor | 1 | Full layout mirroring via `[data-lang="ar"]` CSS; sidebar flip, input alignment, seamless LTR↔RTL | Adil |
-| 8 | **Standard User Management** | Users | **Major** | **2** | Profile edit, role system (STUDENT / LOGISTICS_STAFF / DRIVER), station config, role-based views; all user flows covered by automated tests | Mohamed + Abderrahman + Ayoub |
-| 9 | **Remote Authentication — OAuth 2.0** (42 Intra) | Users | Minor | 1 | Full OAuth 2.0 handshake, JWT issued on callback, `totp_required` flag for 2FA gate | Abderrahman |
-| 10 | **Two-Factor Authentication (TOTP)** | Users | Minor | 1 | pyotp TOTP: QR code setup, 6-digit verify on login, disable flow — all in profile settings | Abderrahman |
-| 11 | **WAF / ModSecurity + HashiCorp Vault** | Cybersecurity | **Major** | **2** | ModSecurity NGINX (paranoia level 2, OWASP CRS) blocks XSS, SQLi, path traversal, Shellshock, Log4Shell, scanner UAs — all verified 403; Vault AppRole supplies all DB/OAuth/Django secrets; CORS restricted to WAF origin only | Aamir + Abderrahman |
-| 12 | **ELK Stack Log Management** | DevOps | **Major** | **2** | Logstash pipeline (TCP + file inputs) ingests NGINX + Django logs → Elasticsearch (cluster status: green) → Kibana dashboards at `https://localhost:5601` | Aamir |
-| 13 | **GDPR Compliance** | Data & Analytics | Minor | 1 | `GET /api/v1/auth/me/export/` (JSON dump), `POST /api/v1/auth/me/delete/` (confirmed deletion), Privacy Policy page; endpoints validated with edge-case tests | Adil + Mohamed + Ayoub |
-| 14 | **Admin Analytics Dashboard** *(custom minor)* | Modules of Choice | Minor | 1 | Recharts BarChart (seat occupancy per bus) + PieChart (reservations by route) in admin overview; justification: domain-specific data visualisation tailored to fleet logistics | Adil |
-
-### Point Totals
-
-| Type | Count | Pts each | Subtotal |
-|------|-------|----------|---------|
-| Major modules | 5 | 2 | **10** |
-| Minor modules | 9 | 1 | **9** |
-| **Grand Total** | **14** | | **19 pts** |
-
-**19 pts — exceeds the 14-point minimum by 5 pts.**
+> "Support multiple devices" (responsive) and HTTPS are mandatory requirements in the subject, not scorable modules. WAF + Vault count as one combined major module.
 
 ---
 
-## 7. Individual Contributions
+## 9. Individual contributions
 
 ### Adil Bourji — Product Owner / Frontend Lead
-- Designed and built the entire React SPA (routing, state, layouts)
-- Created the custom CSS design system (20+ components, design tokens, dark/light mode)
-- Built the admin portal: fleet, route builder (dnd-kit), trip generator, analytics charts (Recharts)
-- Implemented multi-language i18n + Arabic RTL
-- Built GDPR self-service UI in profile settings
-- Implemented Recharts analytics dashboard (seat occupancy + route distribution charts)
+- Designed and built the React SPA (routing, state, layouts)
+- Created the CSS design system (reusable components, design tokens, dark and light themes)
+- Built the admin portal: fleet, routes, trip scheduling, users and roles, analytics charts
+- Implemented EN/FR i18n
+- Built the GDPR self-service UI in profile settings
 
 ### Mohamed Lahrech — Tech Lead / Backend
-- Designed and implemented the full data model (10 tables, relational integrity)
-- Built the core reservation engine (capacity checks, atomic writes)
-- Implemented the announcement system (priority, dismiss tracking)
-- Built the automated trip archiving cron job
-- Implemented GDPR backend endpoints (`/me/export/`, `/me/delete/`)
+- Designed and implemented the data model
+- Built the reservation engine (one seat per night, capacity checks, locked transactions)
+- Implemented the announcement system (priority, dismissal tracking)
+- Built the trip-archiving cron job
+- Implemented the GDPR backend endpoints (`/me/export/`, `/me/delete/`)
 
 ### Aamir Tahtah — Project Manager / DevOps
-- Designed and maintained all 11 Docker containers + Compose orchestration
-- Configured ModSecurity NGINX WAF with OWASP CRS + custom rules (paranoia level 2)
-- Deployed and configured the ELK stack (TLS certs, ILM policies, Kibana system user)
-- Set up the Logstash pipeline (TCP + file inputs) shipping NGINX and Django logs to Elasticsearch
-- Verified WAF blocks: XSS, SQLi, path traversal, Shellshock, Log4Shell, scanner User-Agents
+- Designed and maintained the Docker Compose setup
+- Configured the ModSecurity NGINX WAF with OWASP CRS and custom rules (paranoia level 2)
+- Deployed and configured the ELK stack (TLS certificates, ILM policy, Kibana system user)
+- Set up the Logstash pipeline that ships application logs to Elasticsearch
 
 ### Abderrahman Chakour — Backend Developer
-- Implemented 42 Intra OAuth 2.0 flow (authorization code, token exchange)
-- Built JWT token lifecycle (access/refresh, middleware)
-- Integrated HashiCorp Vault with AppRole; Django reads secrets at runtime
-- Implemented TOTP 2FA backend: model fields, pyotp setup/verify/disable endpoints
+- Implemented the 42 Intra OAuth 2.0 flow (authorization code, token exchange)
+- Built the JWT token lifecycle (access and refresh)
+- Integrated HashiCorp Vault with AppRole
+- Implemented the TOTP 2FA backend (model fields, pyotp setup, verify and disable endpoints)
 
 ### Ayoub El Haouti — QA Engineer / Backend
-- Wrote 52 automated tests covering all apps (buses, trips, reservations, drivers, users)
-- Implemented drf-spectacular OpenAPI 3.0 schema and API documentation
-- Built and hardened the public API with `X-API-Key` authentication
-- Defined DRF serializer validation and standardized exception handling
+- Built the automated test suites
+- Implemented the drf-spectacular OpenAPI 3 schema and API documentation
+- Built the public API with `X-API-Key` authentication
+- Defined DRF serializer validation and standard exception handling
 
 ---
 
-## 8. Instructions
+## 10. Instructions
 
-### Prerequisites
-
-- [Docker](https://docs.docker.com/get-docker/) and Docker Compose v2
-- A registered [42 API application](https://profile.intra.42.fr/oauth/applications)
-
-### Environment Setup
+Full setup is in the root README: [Getting started](../README.md#getting-started) and [Troubleshooting](../README.md#troubleshooting). In short:
 
 ```bash
-cp .env.example .env
+cp .env.example .env   # set INTRA_42_CLIENT_ID / INTRA_42_CLIENT_SECRET / ADMIN_42_LOGIN
+make up                # start the stack and seed demo data
+# open https://localhost:8443 (self-signed certificate)
 ```
 
-Required variables in `.env`:
+Environment variables (see `.env.example`):
 
 | Variable | Description |
 |----------|-------------|
-| `INTRA_42_CLIENT_ID` | 42 API application client ID |
-| `INTRA_42_CLIENT_SECRET` | 42 API application client secret |
-| `INTRA_42_REDIRECT_URI` | Must match your 42 app's callback URL |
-| `ADMIN_42_LOGIN` | Your 42 login that gets admin role |
+| `INTRA_42_CLIENT_ID`, `INTRA_42_CLIENT_SECRET` | Your 42 application's credentials |
+| `INTRA_42_REDIRECT_URI` | `https://localhost:8443/api/v1/auth/42/callback/` (must match the 42 app) |
+| `ADMIN_42_LOGIN` | This 42 login is made staff automatically |
 | `POSTGRES_PASSWORD` | Database password |
 | `SECRET_KEY` | Django secret key |
-| `SSBS_API_KEY` | API key for `X-API-Key` header |
-| `ELASTIC_PASSWORD` | Shared password for all ELK components |
+| `SSBS_API_KEY` | Key for the read-only `X-API-Key` public endpoints |
+| `ELASTIC_PASSWORD` | Password shared by the ELK components (only needed for `make elk-up`) |
 
-> All secrets are injected into HashiCorp Vault at first boot and read from there at runtime — `vault-init` seeds them automatically from `.env`.
-
-### Quick Start
+Tests:
 
 ```bash
-make up          # Build, start all 11 containers, wait for readiness, seed data
+docker compose exec backend python manage.py test   # 86 tests
+docker compose exec frontend npx vitest run         # 23 tests
 ```
 
-### Access URLs
-
-| Service | URL | Notes |
-|---------|-----|-------|
-| **App** | `https://localhost:8443` | Through WAF (NGINX + ModSecurity) |
-| **API docs** | `https://localhost:8443/api/docs/swagger-ui/` | OpenAPI 3.0 UI |
-| **Kibana** | `https://localhost:5601` | Must use `https://` — login: `elastic` / `<ELASTIC_PASSWORD>` |
-| **Elasticsearch** | `https://localhost:9200` | Basic auth required |
-
-### Useful Commands
-
-```bash
-make up          # Start all services + seed database
-make down        # Stop all services
-make clean       # Full reset (remove images, volumes, db data)
-make seed        # Re-seed database without restarting
-make logs        # Stream all container logs
-make shell-be    # Shell into the backend container
-# Run tests:
-docker compose exec backend python manage.py test
-```
-
-### Security Architecture
+### Request path
 
 ```
 Browser → https://localhost:8443
-           │
-         NGINX + ModSecurity WAF  (blocks XSS, SQLi, path traversal, scanners)
-           │
-         ssbs-backend (Django)    (reads all secrets from Vault, not .env)
-           │
-         ssbs-db (PostgreSQL)     (internal only, not exposed to host)
+            │
+          NGINX + ModSecurity WAF   (TLS, OWASP CRS, rate limiting)
+            ├── /      → frontend (Vite)
+            └── /api/  → backend (Django) ── reads secrets from Vault
+                                          └─ PostgreSQL
 ```
 
-> Direct access to `:8000` (backend) and `:5174` (frontend) bypasses the WAF and is intentionally restricted via CORS — all traffic must go through `:8443`.
+> In the development compose file, the backend (`:8000`), frontend (`:5174`) and PostgreSQL (`:5433`) ports are also published on the host, and those requests bypass the WAF. Use `:8443`. Remove those port mappings for any real deployment.
 
 ---
 
-## 9. Resources
+## 11. Resources
 
-### Documentation & References
+### Documentation and references
 - [Django REST Framework](https://www.django-rest-framework.org/)
 - [SimpleJWT](https://django-rest-framework-simplejwt.readthedocs.io/)
-- [HashiCorp Vault — AppRole Auth](https://developer.hashicorp.com/vault/docs/auth/approle)
-- [ModSecurity OWASP CRS](https://coreruleset.org/)
-- [ELK Stack Getting Started](https://www.elastic.co/guide/index.html)
+- [HashiCorp Vault: AppRole auth](https://developer.hashicorp.com/vault/docs/auth/approle)
+- [OWASP Core Rule Set](https://coreruleset.org/)
+- [Elastic Stack documentation](https://www.elastic.co/guide/index.html)
 - [Recharts](https://recharts.org/en-US/)
-- [pyotp TOTP](https://pyauth.github.io/pyotp/)
+- [pyotp](https://pyauth.github.io/pyotp/)
 - [drf-spectacular](https://drf-spectacular.readthedocs.io/)
-- [dnd-kit](https://dndkit.com/)
 
-### AI Usage
-GitHub Copilot (Claude Sonnet) was used throughout the project for:
-- **Boilerplate acceleration**: generating initial serializer/view skeletons for repetitive CRUD modules (buses, drivers, stations), then reviewed and adapted by the team.
-- **Debugging assistance**: diagnosing Vault AppRole token renewal issues and ModSecurity false-positive rule tuning.
-- **Code review support**: identifying missing permission checks in DRF views.
-- **Documentation**: drafting initial README structure, then rewritten by the team to match actual implementation.
-- All AI-generated content was reviewed, tested, and understood by the team member responsible for that module before merge.
+### AI usage
+GitHub Copilot (Claude Sonnet) was used during the project for:
+- **Boilerplate:** first drafts of serializer and view skeletons for repetitive CRUD modules (buses, drivers, stations), which the team then reviewed and adapted.
+- **Debugging:** diagnosing Vault AppRole token issues and tuning ModSecurity false positives.
+- **Code review:** spotting missing permission checks in DRF views.
+- **Documentation:** a first draft of the README structure, which the team rewrote to match the actual implementation.
+
+The team member responsible for each module reviewed, tested and understood all AI-generated content before merging it.
 
 ---
 
-## 10. License
+## 12. License
 
-This project was built as part of the [42 School](https://42.fr) curriculum. All rights reserved by the respective authors.
-
+Built as part of the [42 School](https://42.fr) curriculum. All rights reserved by the respective authors.

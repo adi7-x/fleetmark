@@ -2,7 +2,8 @@ import React, { useEffect, useState } from "react";
 import Badge from "../../components/ui/Badge";
 import AdminEmptyState from "../../components/ui/AdminEmptyState";
 import SetupProgress from "../../components/ui/SetupProgress";
-import { API_BASE } from "../../services/api";
+import { API_BASE, getAccessToken, authFetch, errorMessage } from "../../services/api";
+import { useTranslation } from "../../context/TranslationContext";
 
 function DriversSkeleton() {
   return (
@@ -22,6 +23,7 @@ function DriversSkeleton() {
 const emptyForm = { name: "", username: "", password: "", status: "active" };
 
 export default function Drivers() {
+  const { t } = useTranslation();
   const [drivers, setDrivers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -30,29 +32,28 @@ export default function Drivers() {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [notice, setNotice] = useState("");
 
-  const token = localStorage.getItem("fleetmark_access");
+  const token = getAccessToken();
   const headers = { 
     Authorization: `Bearer ${token}`, 
     "Content-Type": "application/json",
-    "X-API-Key": import.meta.env.VITE_API_KEY
   };
 
   async function load() {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch(`${API_BASE}/drivers/`, { 
+      const res = await authFetch(`${API_BASE}/drivers/`, { 
         headers: { 
           Authorization: `Bearer ${token}`,
-          "X-API-Key": import.meta.env.VITE_API_KEY
         } 
       });
-      if (!res.ok) throw new Error("Failed to load drivers.");
+      if (!res.ok) throw new Error(t("driversLoadFailed"));
       const data = await res.json();
       setDrivers(Array.isArray(data) ? data : []);
     } catch (err) {
-      setError(err.message || "Unable to load drivers.");
+      setError(err.message || t("driversLoadUnable"));
     } finally {
       setLoading(false);
     }
@@ -73,6 +74,7 @@ export default function Drivers() {
   function openCreate() {
     setEditing(null);
     setForm(emptyForm);
+    setError("");
     setOpen(true);
   }
 
@@ -83,12 +85,13 @@ export default function Drivers() {
       username: driver.username || "",
       status: driver.status || "active",
     });
+    setError("");
     setOpen(true);
   }
 
   async function save() {
-    if (!form.name || !form.username || !form.status) {
-      setError("All fields are required.");
+    if (!form.name || !form.username || !form.status || (!editing && !form.password)) {
+      setError(editing ? t("driversRequiredEdit") : t("driversRequiredNew"));
       return;
     }
     setSaving(true);
@@ -97,15 +100,12 @@ export default function Drivers() {
       const payload = { ...form };
       const endpoint = editing ? `${API_BASE}/drivers/${editing.id}/` : `${API_BASE}/drivers/`;
       const method = editing ? "PUT" : "POST";
-      const res = await fetch(endpoint, { method, headers, body: JSON.stringify(payload) });
-      if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        throw new Error(data?.detail || data?.username?.[0] || `Save failed (${res.status}).`);
-      }
+      const res = await authFetch(endpoint, { method, headers, body: JSON.stringify(payload) });
+      if (!res.ok) throw new Error(await errorMessage(res, t("saveFailed")));
       setOpen(false);
       await load();
     } catch (err) {
-      setError(err.message || "Save failed.");
+      setError(err.message || t("saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -113,12 +113,17 @@ export default function Drivers() {
 
   async function remove(id) {
     try {
-      const res = await fetch(`${API_BASE}/drivers/${id}/`, { method: "DELETE", headers });
-      if (!res.ok) throw new Error("Delete failed.");
+      const res = await authFetch(`${API_BASE}/drivers/${id}/`, { method: "DELETE", headers });
       setConfirmDelete(null);
+      if (!res.ok) {
+        // A driver with trips is deactivated instead of deleted (400 + detail).
+        setNotice(await errorMessage(res, t("itemDeleteFailed")));
+      } else {
+        setNotice(t("driversDeleted"));
+      }
       await load();
     } catch (err) {
-      setError(err.message || "Delete failed.");
+      setError(err.message || t("itemDeleteFailed"));
     }
   }
 
@@ -126,8 +131,8 @@ export default function Drivers() {
 
   return (
     <div className="animate-in" style={{ display: "grid", gap: "var(--space-4)" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h1 style={{ margin: 0 }}>Drivers</h1>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <p style={{ margin: 0, color: "var(--mid)", fontSize: 14 }}>{t("driversHint")}</p>
         <button
           type="button"
           onClick={openCreate}
@@ -146,29 +151,30 @@ export default function Drivers() {
           }}
         >
           <span className="material-symbols-outlined" style={{ fontSize: 18 }}>add</span>
-          New Driver
+          {t("driversNew")}
         </button>
       </div>
 
       <SetupProgress currentStep="drivers" done={drivers.length > 0} />
 
-      {error ? <p style={{ color: "var(--red)", margin: 0 }}>{error}</p> : null}
+      {notice ? <p role="status" style={{ color: "var(--amber)", margin: 0 }}>{notice}</p> : null}
+      {error && !open ? <p role="alert" style={{ color: "var(--red)", margin: 0 }}>{error}</p> : null}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(260px,1fr))", gap: "var(--space-4)" }}>
         {drivers.map((driver) => (
           <article key={driver.id} style={{ border: "1px solid var(--line2)", borderRadius: "var(--radius-md)", background: "var(--surface)", padding: "var(--space-5)", position: "relative" }}>
             <div style={{ position: "absolute", top: 16, right: 16, display: "flex", gap: 6 }}>
-              <button type="button" onClick={() => openEdit(driver)} style={{ border: "none", background: "transparent", color: "var(--mid)", cursor: "pointer", padding: 0 }}>
+              <button type="button" aria-label={t("editNamed").replace("{{name}}", driver.name)} title={t("edit")} onClick={() => openEdit(driver)} style={{ border: "none", background: "transparent", color: "var(--mid)", cursor: "pointer", padding: 0 }}>
                 <span className="material-symbols-outlined" style={{ fontSize: 18 }}>edit</span>
               </button>
-              <button type="button" onClick={() => setConfirmDelete(driver)} style={{ border: "none", background: "transparent", color: "var(--red)", cursor: "pointer", padding: 0 }}>
+              <button type="button" aria-label={t("deleteNamed").replace("{{name}}", driver.name)} title={t("delete")} onClick={() => setConfirmDelete(driver)} style={{ border: "none", background: "transparent", color: "var(--red)", cursor: "pointer", padding: 0 }}>
                 <span className="material-symbols-outlined" style={{ fontSize: 18 }}>delete</span>
               </button>
             </div>
             
             <h3 style={{ margin: 0, paddingRight: 40 }}>{driver.name}</h3>
             <p className="mono" style={{ margin: "var(--space-2) 0", color: "var(--mid)" }}>@{driver.username}</p>
-            <Badge variant={driver.status === "active" ? "green" : "dim"}>{driver.status || "unknown"}</Badge>
+            <Badge variant={driver.status === "active" ? "green" : "dim"}>{driver.status === "active" ? t("usersActive") : t("statusInactive")}</Badge>
           </article>
         ))}
         {!drivers.length ? (
@@ -180,57 +186,57 @@ export default function Drivers() {
 
       {/* Create / Edit Modal */}
       {open ? (
-        <div className="modal-backdrop-anim" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "grid", placeItems: "center", zIndex: 20 }}>
-          <div style={{ width: "min(480px,92vw)", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-md)", padding: "var(--space-6)", display: "grid", gap: "var(--space-3)" }}>
-            <h3 style={{ margin: 0 }}>{editing ? "Edit Driver" : "Add New Driver"}</h3>
+        <div className="modal-backdrop-anim" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "grid", placeItems: "center", zIndex: 1000 }}>
+          <div role="dialog" aria-modal="true" style={{ width: "min(480px,92vw)", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-md)", padding: "var(--space-6)", display: "grid", gap: "var(--space-3)" }}>
+            <h3 style={{ margin: 0 }}>{editing ? t("driversEdit") : t("driversAdd")}</h3>
+            {error ? <p role="alert" style={{ color: "var(--red)", fontSize: 13, margin: 0 }}>{error}</p> : null}
             <div style={{ display: "grid", gap: "var(--space-2)" }}>
-              <label style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--mid)", fontWeight: 700 }}>Name</label>
+              <label style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--mid)", fontWeight: 700 }}>{t("colName")}</label>
               <input
                 value={form.name}
                 onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
-                placeholder="e.g. Driver 1"
+                placeholder={t("driversNamePh")}
                 style={{ background: "var(--surface2)", color: "var(--ink)", border: "1px solid var(--line)", borderRadius: 8, padding: 10 }}
               />
             </div>
             <div style={{ display: "grid", gap: "var(--space-2)" }}>
-              <label style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--mid)", fontWeight: 700 }}>Username (@)</label>
+              <label style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--mid)", fontWeight: 700 }}>{t("driversUsername")}</label>
               <input
                 value={form.username}
                 onChange={(e) => setForm((p) => ({ ...p, username: e.target.value }))}
-                placeholder="e.g. driver1"
+                placeholder={t("driversUsernamePh")}
                 style={{ background: "var(--surface2)", color: "var(--ink)", border: "1px solid var(--line)", borderRadius: 8, padding: 10 }}
               />
             </div>
             <div style={{ display: "grid", gap: "var(--space-2)" }}>
-              <label style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--mid)", fontWeight: 700 }}>Status</label>
+              <label style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--mid)", fontWeight: 700 }}>{t("colStatus")}</label>
               <select
                 value={form.status}
                 onChange={(e) => setForm((p) => ({ ...p, status: e.target.value }))}
                 style={{ background: "var(--surface2)", color: "var(--ink)", border: "1px solid var(--line)", borderRadius: 8, padding: 10 }}
               >
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-                <option value="suspended">Suspended</option>
+                <option value="active">{t("usersActive")}</option>
+                <option value="inactive">{t("statusInactive")}</option>
               </select>
             </div>
             {!editing ? (
               <div style={{ display: "grid", gap: "var(--space-2)" }}>
-                <label style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--mid)", fontWeight: 700 }}>Password</label>
+                <label style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--mid)", fontWeight: 700 }}>{t("driversPassword")}</label>
                 <input
                   type="password"
                   value={form.password}
                   onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))}
-                  placeholder="Driver login password"
+                  placeholder={t("driversPasswordPh")}
                   style={{ background: "var(--surface2)", color: "var(--ink)", border: "1px solid var(--line)", borderRadius: 8, padding: 10 }}
                 />
               </div>
             ) : null}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: "var(--space-2)" }}>
               <button type="button" onClick={() => setOpen(false)} style={{ border: "1px solid var(--line)", background: "var(--surface2)", color: "var(--ink)", borderRadius: 8, padding: "9px 12px", cursor: "pointer" }}>
-                Cancel
+                {t("cancel")}
               </button>
               <button type="button" onClick={save} disabled={saving} style={{ border: "1px solid var(--blue-bdr)", background: "var(--blue-bg)", color: "var(--blue)", borderRadius: 8, padding: "9px 12px", fontWeight: 700, cursor: "pointer" }}>
-                {saving ? "Saving..." : "Save"}
+                {saving ? t("savingDots") : t("save")}
               </button>
             </div>
           </div>
@@ -239,19 +245,18 @@ export default function Drivers() {
 
       {/* Delete Confirmation Modal */}
       {confirmDelete ? (
-        <div className="modal-backdrop-anim" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "grid", placeItems: "center", zIndex: 20 }}>
-          <div style={{ width: "min(420px,90vw)", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-md)", padding: "var(--space-6)", display: "grid", gap: "var(--space-4)" }}>
-            <h3 style={{ margin: 0 }}>Delete Driver</h3>
+        <div className="modal-backdrop-anim" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "grid", placeItems: "center", zIndex: 1000 }}>
+          <div role="dialog" aria-modal="true" style={{ width: "min(420px,90vw)", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-md)", padding: "var(--space-6)", display: "grid", gap: "var(--space-4)" }}>
+            <h3 style={{ margin: 0 }}>{t("driversDeleteTitle")}</h3>
             <p style={{ margin: 0, color: "var(--mid)" }}>
-              Are you sure you want to delete driver <strong>{confirmDelete.name}</strong> (@{confirmDelete.username})?
-              This action cannot be undone.
+              {t("driversDeleteLead")} <strong>{confirmDelete.name}</strong> (@{confirmDelete.username}){t("qMark")} {t("cannotUndo")}
             </p>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
               <button type="button" onClick={() => setConfirmDelete(null)} style={{ border: "1px solid var(--line)", background: "var(--surface2)", color: "var(--ink)", borderRadius: 8, padding: "9px 12px", cursor: "pointer" }}>
-                Cancel
+                {t("cancel")}
               </button>
               <button type="button" onClick={() => remove(confirmDelete.id)} style={{ border: "1px solid color-mix(in srgb, var(--red) 40%, transparent)", background: "var(--red-bg)", color: "var(--red)", borderRadius: 8, padding: "9px 12px", fontWeight: 700, cursor: "pointer" }}>
-                Delete
+                {t("delete")}
               </button>
             </div>
           </div>

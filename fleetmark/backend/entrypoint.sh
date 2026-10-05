@@ -39,5 +39,24 @@ python manage.py migrate --noinput
 mkdir -p /var/log/ssbs
 
 # 5. START SERVER
-echo "🚀 Starting Django Server..."
-exec python manage.py runserver 0.0.0.0:8000
+# Dev/eval (APP_DEBUG=true, the default in .env): Django's autoreload dev
+# server. Production (APP_DEBUG=false): collect static assets and serve via
+# gunicorn — a real WSGI server — instead of the runserver dev server, which
+# prints its own "do not use this in a production setting" warning.
+APP_DEBUG_LC=$(printf '%s' "${APP_DEBUG:-${DEBUG:-false}}" | tr '[:upper:]' '[:lower:]')
+case "$APP_DEBUG_LC" in
+    true|1|yes|t)
+        echo "🚀 Starting Django dev server (APP_DEBUG=$APP_DEBUG_LC)..."
+        exec python manage.py runserver 0.0.0.0:8000
+        ;;
+    *)
+        echo "🧱 Collecting static files..."
+        python manage.py collectstatic --noinput
+        echo "🚀 Starting gunicorn (production)..."
+        exec gunicorn ssbs.wsgi:application \
+            --bind 0.0.0.0:8000 \
+            --workers "${GUNICORN_WORKERS:-3}" \
+            --access-logfile - \
+            --error-logfile -
+        ;;
+esac

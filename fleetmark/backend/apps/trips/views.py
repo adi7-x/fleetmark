@@ -15,7 +15,7 @@ from apps.users.permissions import IsLogisticsStaff
 
 
 class TripListCreateView(generics.ListCreateAPIView):
-	queryset = Trip.objects.select_related('route', 'bus', 'driver')
+	queryset = Trip.objects.select_related('route', 'bus', 'driver').prefetch_related('route__route_stations__station')
 	serializer_class = TripSerializer
 	permission_classes = [IsLogisticsStaff]
 
@@ -26,7 +26,7 @@ class TripListCreateView(generics.ListCreateAPIView):
 
 
 class TripDetailView(generics.RetrieveUpdateDestroyAPIView):
-	queryset = Trip.objects.select_related('route', 'bus', 'driver')
+	queryset = Trip.objects.select_related('route', 'bus', 'driver').prefetch_related('route__route_stations__station')
 	serializer_class = TripSerializer
 	permission_classes = [IsLogisticsStaff]
 
@@ -67,6 +67,7 @@ class AvailableTripListView(APIView):
 				archived_at__isnull=True,
 			)
 			.select_related('route', 'bus')
+			.prefetch_related('route__route_stations__station')
 			.annotate(reservation_count=Count('reservations'))
 			.filter(reservation_count__lt=F('bus__seat_capacity'))
 			.order_by('departure_datetime')
@@ -101,7 +102,12 @@ class BulkGenerateTripsView(APIView):
 		bus_cb, _ = Bus.objects.get_or_create(name='Coin Blue Route Bus', defaults={'plate': 'CB-001', 'seat_capacity': 50})
 		bus_unified, _ = Bus.objects.get_or_create(name='Unified Night Route Bus', defaults={'plate': 'UNI-001', 'seat_capacity': 50})
 		
-		default_driver, _ = Driver.objects.get_or_create(name='Night Shift Driver', defaults={'license_number': 'NS-DEFAULT', 'contact_number': ''})
+		default_driver = Driver.objects.filter(status='active').first()
+		if default_driver is None:
+			return Response(
+				{'detail': 'Add at least one active driver before generating trips.'},
+				status=status.HTTP_400_BAD_REQUEST,
+			)
 
 		# allowed hours: 21, 22, 23, 0, 1, 3, 4, 5, 6
 		hours = [21, 22, 23, 0, 1, 3, 4, 5, 6]
@@ -250,5 +256,7 @@ class BulkDeleteTripsView(APIView):
 				status=status.HTTP_400_BAD_REQUEST,
 			)
 
-		count, _ = qs.delete()
+		# delete() also counts cascaded reservations; report trips only.
+		_, per_model = qs.delete()
+		count = per_model.get('trips.Trip', 0)
 		return Response({'detail': f'Deleted {count} trips.'}, status=status.HTTP_200_OK)

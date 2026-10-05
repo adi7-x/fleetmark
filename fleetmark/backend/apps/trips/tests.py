@@ -168,3 +168,33 @@ class TripAPITests(APITestCase):
 		self.assertEqual(resp.status_code, status.HTTP_200_OK)
 		self.assertFalse(Trip.objects.filter(id=drop.id).exists())
 		self.assertTrue(Trip.objects.filter(id=keep.id).exists())
+
+	def test_trip_payload_has_capacity_and_ordered_stops(self):
+		RouteStation.objects.create(route=self.route_peak, station=Station.objects.create(name='Station B'), order=2)
+		trip = self._create_trip()
+		self.client.force_authenticate(user=self.logistics_user)
+		resp = self.client.get(reverse('trip-detail', args=[trip.id]))
+		self.assertEqual(resp.data['bus_seat_capacity'], 10)
+		self.assertEqual(resp.data['route_stops'], ['Station A', 'Station B'])
+
+	def test_staff_can_archive_trip_with_patch(self):
+		trip = self._create_trip()
+		self.client.force_authenticate(user=self.logistics_user)
+		resp = self.client.patch(reverse('trip-detail', args=[trip.id]), {'archived_at': '2026-01-02T00:00:00Z'}, format='json')
+		self.assertEqual(resp.status_code, status.HTTP_200_OK)
+		trip.refresh_from_db()
+		self.assertIsNotNone(trip.archived_at)
+
+	def test_bulk_delete_reports_trip_count_not_cascaded_rows(self):
+		trip = self._create_trip()
+		Reservation.objects.create(trip=trip, student=self.student_user)
+		self.client.force_authenticate(user=self.logistics_user)
+		resp = self.client.delete(reverse('trip-bulk-delete'), {'confirm': True, 'ids': [str(trip.id)]}, format='json')
+		self.assertEqual(resp.data['detail'], 'Deleted 1 trips.')
+
+	def test_cannot_archive_a_trip_that_has_not_departed(self):
+		trip = Trip.objects.create(route=self.route_peak, bus=self.bus, driver=self.driver,
+			departure_datetime=timezone.now() + timezone.timedelta(days=1))
+		self.client.force_authenticate(user=self.logistics_user)
+		resp = self.client.patch(reverse('trip-detail', args=[trip.id]), {'archived_at': timezone.now().isoformat()}, format='json')
+		self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)

@@ -1,0 +1,48 @@
+%% FLEETMARK / SSBS — System architecture (derived from docker-compose.yml + waf/conf/nginx.conf)
+%% Single public entry point is the WAF on host :8443. ELK is optional and needs certs.
+flowchart TB
+    browser["Browser (HTTPS)"]
+
+    subgraph host["Docker host — ssbs-network (bridge)"]
+        waf["ssbs-waf<br/>NGINX + ModSecurity (OWASP CRS)<br/>host 8443 → 443"]
+
+        subgraph app["Application containers"]
+            frontend["ssbs-frontend<br/>React + Vite dev server<br/>host 5174 → 5174"]
+            backend["ssbs-backend<br/>Django + DRF (runserver)<br/>host 8000 → 8000"]
+            cron["ssbs-cron<br/>loop: manage.py archive_trips (60s)"]
+        end
+
+        subgraph state["State + secrets"]
+            db[("ssbs-db<br/>PostgreSQL 15<br/>host 5433 → 5432")]
+            vault["ssbs-vault<br/>HashiCorp Vault<br/>:8200 (internal only)"]
+            vaultinit["ssbs-vault-init<br/>one-shot: init, unseal, seed secrets"]
+            approle[("vault-approle volume<br/>role-id / secret-id")]
+            logs[("./logs volume<br/>backend.log")]
+        end
+
+        subgraph elk["ELK stack (optional — requires elk/certs)"]
+            es["elasticsearch<br/>host 9200"]
+            logstash["logstash<br/>host 5044 / 5001 / 9600"]
+            kibana["kibana<br/>host 5601"]
+            elksetup["elk-setup<br/>one-shot provisioning"]
+        end
+    end
+
+    browser -->|"443 HTTPS (all traffic)"| waf
+    waf -->|"/ → frontend:5174 (serves SPA)"| frontend
+    waf -->|"/api /static /media /django-admin → backend:8000"| backend
+    browser -.->|"SPA calls VITE_API_URL https://localhost:8443/api/v1"| waf
+
+    backend -->|"5432 SQL"| db
+    cron -->|"5432 SQL"| db
+    backend -->|"8200 AppRole login + KV v2 read"| vault
+    vaultinit -->|"init / unseal / write secret/ssbs/*"| vault
+    vaultinit -.->|"writes"| approle
+    backend -.->|"reads"| approle
+    backend -.->|"writes logs"| logs
+
+    logs -.->|"reads mounted logs"| logstash
+    logstash -->|"9200 TLS"| es
+    kibana -->|"9200 TLS"| es
+    elksetup -.->|"provisions"| kibana
+    browser -.->|"5601 (direct, dev only)"| kibana

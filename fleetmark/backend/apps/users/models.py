@@ -49,6 +49,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     is_staff = models.BooleanField(default=False)
     totp_secret = models.CharField(max_length=32, null=True, blank=True)
     totp_enabled = models.BooleanField(default=False)
+    avatar_url = models.URLField(max_length=500, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     objects = UserManager()

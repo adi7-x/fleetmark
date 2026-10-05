@@ -14,7 +14,7 @@ const navItems = [
   { id: "history",     labelKey: "navHistory",   path: "/admin/reservations", icon: "history"      },
   { id: "reports",     labelKey: "navReports",   path: "/admin/reports",      icon: "analytics"    },
   { id: "announcements", labelKey: "navAnnouncements", path: "/admin/announcements", icon: "campaign" },
-  { id: "settings",    labelKey: "navSettings",  path: "/admin/settings",     icon: "settings"     },
+  { id: "users",       labelKey: "navUsers",     path: "/admin/users",        icon: "group"        },
 ];
 
 export default function AdminLayout({
@@ -22,7 +22,6 @@ export default function AdminLayout({
   activePath,
   onNavigate,
   onLogout,
-  onNewTrip,
   children,
   pageTitle = "Dashboard",
 }) {
@@ -34,6 +33,14 @@ export default function AdminLayout({
   useEffect(() => {
     setDrawerOpen(false);
   }, [activePath]);
+
+  // Close drawer on Escape
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const onKey = (e) => { if (e.key === "Escape") setDrawerOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [drawerOpen]);
 
   function handleNavigate(path) {
     onNavigate?.(path);
@@ -62,7 +69,7 @@ export default function AdminLayout({
             fontWeight: "var(--font-medium)",
           }}
         >
-          1337 Shuttle System
+          {t("appTagline")}
         </div>
       </div>
 
@@ -76,9 +83,11 @@ export default function AdminLayout({
               type="button"
               onClick={() => handleNavigate(item.path)}
               className={`nav-item${active ? " active" : ""}`}
+              aria-current={active ? "page" : undefined}
             >
               <span
                 className="material-symbols-outlined"
+                aria-hidden="true"
                 style={{
                   fontSize: 20,
                   flexShrink: 0,
@@ -105,7 +114,7 @@ export default function AdminLayout({
       >
         {/* Language switcher */}
         <div style={{ display: "flex", gap: 4, padding: "2px var(--space-3) 6px" }}>
-          {["en", "fr", "ar"].map((l) => (
+          {["en", "fr"].map((l) => (
             <button
               key={l}
               type="button"
@@ -120,20 +129,20 @@ export default function AdminLayout({
                 fontWeight: lang === l ? 700 : 500,
                 cursor: "pointer",
                 fontSize: 11,
-                letterSpacing: l === "ar" ? "0" : "0.02em",
+                letterSpacing: "0.02em",
               }}
             >
               {l.toUpperCase()}
             </button>
           ))}
         </div>
-        <UserIdentity login={login} role="Admin" />
+        <UserIdentity login={login} role={t("roleAdminShort")} />
         <button
           type="button"
           className="nav-item"
           onClick={onLogout}
         >
-          <span className="material-symbols-outlined" style={{ fontSize: 20, flexShrink: 0, lineHeight: 1 }}>
+          <span className="material-symbols-outlined" aria-hidden="true" style={{ fontSize: 20, flexShrink: 0, lineHeight: 1 }}>
             logout
           </span>
           {t("navLogout")}
@@ -145,13 +154,13 @@ export default function AdminLayout({
   return (
     <div className="layout-root" style={{ '--accent': '#10b981', '--accent2': '#34d399', '--accent-light': 'rgba(16,185,129,0.08)', '--accent-mid': 'rgba(16,185,129,0.14)', '--accent-border': 'rgba(16,185,129,0.28)', '--accent-glow': 'rgba(16,185,129,0.2)', '--accent-dim': '#d1fae5' }}>
       {/* Skip-to-content link — Fix 3c */}
-      <a href="#main-content" className="skip-link">Skip to main content</a>
+      <a href="#main-content" className="skip-link">{t("skipToContent")}</a>
       {/* Mobile backdrop */}
       {drawerOpen && (
         <button
           type="button"
           className="sidebar-backdrop"
-          aria-label="Close menu"
+          aria-label={t("closeMenu")}
           onClick={() => setDrawerOpen(false)}
         />
       )}
@@ -168,34 +177,33 @@ export default function AdminLayout({
           <button
             type="button"
             className="btn btn-ghost btn-sm btn-icon sidebar-hamburger"
-            aria-label="Open menu"
+            aria-label={t("openMenu")}
+            title={t("openMenu")}
+            aria-expanded={drawerOpen}
             onClick={() => setDrawerOpen(true)}
           >
-            <span className="material-symbols-outlined" style={{ fontSize: 22, lineHeight: 1 }}>menu</span>
+            <span className="material-symbols-outlined" aria-hidden="true" style={{ fontSize: 22, lineHeight: 1 }}>menu</span>
           </button>
 
           <div
+            className="header-title"
             style={{
               margin: 0,
               fontSize: "var(--font-size-xl)",
               fontWeight: "var(--font-bold)",
               letterSpacing: "-0.02em",
-              flex: "1 1 auto",
-              minWidth: 0,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-              lineHeight: 1,
+              lineHeight: 1.2,
             }}
             role="heading"
-            aria-level="2"
+            aria-level="1"
           >
             {pageTitle}
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", flexShrink: 0 }}>
-            {/* User avatar */}
+            {/* User avatar — hidden at <=768px via CSS (shown in drawer) */}
             <div
+              className="header-avatar"
               style={{
                 width: 30,
                 height: 30,
@@ -217,8 +225,8 @@ export default function AdminLayout({
               size="sm"
               icon="refresh"
               iconOnly
-              title="Refresh"
-              aria-label="Refresh"
+              title={t("refresh")}
+              aria-label={t("refresh")}
               onClick={() => window.dispatchEvent(new CustomEvent("fleetmark:refresh"))}
             />
 
@@ -241,9 +249,9 @@ export default function AdminLayout({
         >
           <span>© 2026 Fleetmark</span>
           <span>·</span>
-          <a href="/privacy" style={{ color: "var(--dim)", textDecoration: "none", fontWeight: 600 }}>Privacy</a>
+          <a href="/privacy" style={{ color: "var(--dim)", textDecoration: "none", fontWeight: 600 }}>{t("privacy")}</a>
           <span>·</span>
-          <a href="/terms" style={{ color: "var(--dim)", textDecoration: "none", fontWeight: 600 }}>Terms</a>
+          <a href="/terms" style={{ color: "var(--dim)", textDecoration: "none", fontWeight: 600 }}>{t("terms")}</a>
         </footer>
       </main>
     </div>

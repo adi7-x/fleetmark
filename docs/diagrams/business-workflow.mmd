@@ -1,0 +1,40 @@
+%% FLEETMARK / SSBS — Business workflow (derived from apps/trips/views.py + apps/reservations/views.py + archive_trips.py)
+%% Booking window is reproduced exactly as implemented.
+flowchart TD
+    A["Staff generates trips<br/>BulkGenerateTripsView"] --> B{"Departure hour type?"}
+    B -->|"peak: 21, 22, 01"| C["2 trips created:<br/>OCP Route + Coin Blue Route"]
+    B -->|"other: 23, 00, 03, 04, 05, 06"| D["1 trip created:<br/>Unified Night Route"]
+    C --> E[("Trip rows<br/>route + bus + driver + departure_datetime")]
+    D --> E
+
+    S["Student picks home station<br/>opens 'Reserve a seat'"] --> AV["GET /api/v1/trips/available/?station_id=<br/>AvailableTripListView"]
+    E --> AV
+    AV --> W["Apply booking window (see rules box)"]
+    W --> LIST["Returns upcoming, non-archived trips<br/>for that station that still have seats"]
+
+    LIST --> R["POST /api/v1/reservations/<br/>student = request.user (C1 fix — no client user_id)"]
+    R --> V1{"Trip archived?"}
+    V1 -->|yes| X1["400 LifecycleError"]
+    V1 -->|no| V2{"seats_left ≤ 0?"}
+    V2 -->|yes| X2["409 CapacityError"]
+    V2 -->|no| V3{"Already reserved<br/>this night window?"}
+    V3 -->|yes| X3["400 duplicate (one per night)"]
+    V3 -->|no| OK["201 Reservation created<br/>DB unique (trip, student)"]
+
+    OK --> CNT["Staff dashboard: real counts per stop / per trip<br/>seats_left = bus.seat_capacity − reservations.count()"]
+    CNT --> ALLOC["Staff adjusts bus / route / driver to match demand"]
+    ALLOC --> RUN["Trip departs at departure_datetime"]
+    RUN --> ARCH["cron archive_trips (every 60s):<br/>departed > 25 min ago AND has reservations<br/>→ sets archived_at"]
+    ARCH --> HIST["Trip + its reservations move to history views"]
+
+    subgraph RULES["Booking-window rules — as implemented"]
+        direction TB
+        N1["now = localtime(now()), TIME_ZONE = Africa/Casablanca"]
+        N2["if now.hour < 06 → shift_date = yesterday<br/>else → shift_date = today"]
+        N3["window = [ shift_date 21:00  →  (shift_date + 1 day) 06:00 ]"]
+        N4["available trip must be: in window<br/>AND departure_datetime ≥ now<br/>AND archived_at is null<br/>AND reservations < bus.seat_capacity"]
+        N5["duplicate guard: one reservation per student<br/>per window (get_bus_day_bounds)"]
+        N1 --> N2 --> N3 --> N4 --> N5
+    end
+
+    W -.->|uses| RULES

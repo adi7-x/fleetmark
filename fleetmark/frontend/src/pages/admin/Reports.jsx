@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useState } from "react";
 import useCountUp from "../../hooks/useCountUp";
 import AdminEmptyState from "../../components/ui/AdminEmptyState";
 import ReportManager from "../../components/ReportManager";
-import { API_BASE } from "../../services/api";
+import { API_BASE, getAccessToken, authFetch, errorMessage } from "../../services/api";
+import { useTranslation } from "../../context/TranslationContext";
 
 function ReportStatCard({ label, value, icon, color }) {
   const display = useCountUp(value);
@@ -51,6 +52,7 @@ function ReportsSkeleton() {
 
 
 export default function Reports() {
+  const { t } = useTranslation();
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -59,18 +61,17 @@ export default function Reports() {
     setLoading(true);
     setError("");
     try {
-      const token = localStorage.getItem("fleetmark_access");
-      const res = await fetch(`${API_BASE}/reports/`, {
+      const token = getAccessToken();
+      const res = await authFetch(`${API_BASE}/reports/`, {
         headers: {
           Authorization: `Bearer ${token}`,
-          "X-API-Key": import.meta.env.VITE_API_KEY,
         },
       });
-      if (!res.ok) throw new Error("Failed to load reports.");
+      if (!res.ok) throw new Error(await errorMessage(res, t("reportsLoadFailed")));
       const data = await res.json();
       setReports(Array.isArray(data) ? data : []);
     } catch (err) {
-      setError(err.message || "Unable to load reports.");
+      setError(err.message || t("reportsLoadUnable"));
     } finally {
       setLoading(false);
     }
@@ -106,19 +107,19 @@ export default function Reports() {
   return (
     <div className="animate-in" style={{ display: "grid", gap: "var(--space-5)" }}>
       <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(180px,1fr))", gap: "var(--space-4)" }}>
-        <ReportStatCard label="Total reports" value={totalReports} icon="description" color="var(--blue)" />
-        <ReportStatCard label="Pending" value={pending} icon="pending_actions" color="var(--amber, orange)" />
-        <ReportStatCard label="Resolved" value={resolved} icon="check_circle" color="var(--green)" />
+        <ReportStatCard label={t("reportsTotal")} value={totalReports} icon="description" color="var(--blue)" />
+        <ReportStatCard label={t("reportsPending")} value={pending} icon="pending_actions" color="var(--amber, orange)" />
+        <ReportStatCard label={t("reportsResolved")} value={resolved} icon="check_circle" color="var(--green)" />
       </section>
 
       <section style={{ border: "1px solid var(--line2)", borderRadius: "var(--radius-md)", background: "var(--surface)", padding: "var(--space-5)" }}>
-        <h2 style={{ marginTop: 0 }}>Incident categories</h2>
+        <h2 style={{ marginTop: 0 }}>{t("reportsCategories")}</h2>
         {error ? <p style={{ color: "var(--red)" }}>{error}</p> : null}
         <div style={{ display: "grid", gap: "var(--space-3)" }}>
           {Object.keys(stats.byCat).length ? (
             Object.entries(stats.byCat).map(([cat, count]) => (
               <div key={cat} style={{ display: "grid", gridTemplateColumns: "140px 1fr 40px", alignItems: "center", gap: "var(--space-3)" }}>
-                <span style={{ color: "var(--mid)", textTransform: "capitalize" }}>{cat}</span>
+                <span style={{ color: "var(--mid)", textTransform: "capitalize" }}>{t(`reportCat_${cat}`)}</span>
                 <div style={{ width: "100%", height: 10, borderRadius: 999, background: "var(--surface2)", overflow: "hidden" }}>
                   <div style={{ width: `${(count / stats.max) * 100}%`, height: "100%", background: "var(--blue)", borderRadius: 999, transition: "width 0.4s ease" }} />
                 </div>

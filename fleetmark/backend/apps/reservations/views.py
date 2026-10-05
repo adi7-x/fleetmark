@@ -14,7 +14,8 @@ from apps.users.models import User
 
 def get_bus_day_bounds(dt):
 	local_dt = localtime(dt)
-	if local_dt.hour < 6:
+	# 06:00 is the night's last departure, so it belongs to the night before.
+	if local_dt.time() <= time(6, 0):
 		shift_date = local_dt.date() - timedelta(days=1)
 	else:
 		shift_date = local_dt.date()
@@ -38,6 +39,7 @@ class ReservationListCreateView(APIView):
 				trip__archived_at__isnull=True,
 			)
 
+		reservations = reservations.select_related('trip__route', 'trip__bus').prefetch_related('trip__route__route_stations__station')
 		serializer = ReservationSerializer(reservations, many=True)
 		return Response(serializer.data)
 
@@ -122,6 +124,7 @@ class ReservationHistoryView(APIView):
 				trip__archived_at__isnull=False,
 			)
 
+		reservations = reservations.select_related('trip__route', 'trip__bus').prefetch_related('trip__route__route_stations__station')
 		serializer = ReservationSerializer(reservations, many=True)
 		return Response(serializer.data)
 
@@ -155,6 +158,7 @@ class ReservationSearchView(APIView):
 			except ValueError:
 				pass
 				
-		qs = qs.order_by('-trip__departure_datetime')
+		# ponytail: hard cap instead of pagination; add paging if 500 is ever too few.
+		qs = qs.order_by('-trip__departure_datetime').prefetch_related('trip__route__route_stations__station')[:500]
 		serializer = ReservationSerializer(qs, many=True)
 		return Response(serializer.data)

@@ -11,8 +11,9 @@ import SkeletonTable from "../../components/ui/SkeletonTable";
 import Badge from "../../components/ui/Badge";
 import PageHeader from "../../components/ui/PageHeader";
 import useCountUp from "../../hooks/useCountUp";
-import { API_BASE } from "../../services/api";
+import { API_BASE, getAccessToken, authFetch } from "../../services/api";
 import { useTranslation } from "../../context/TranslationContext";
+import { fmtTime, fmtDate, tonightWindow } from "../../utils/datetime";
 
 const CHART_COLORS = ["#6366f1", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4"];
 
@@ -21,6 +22,9 @@ const KPI_ICONS = [
   { icon: "airline_seat_recline_normal", color: "var(--green)" },
   { icon: "map",          color: "var(--amber)" },
 ];
+
+
+const timeOf = fmtTime;
 
 function getSeatsStatus(left, cap) {
   if (!cap || cap <= 0) return "dim";
@@ -45,22 +49,22 @@ export default function Overview() {
   useEffect(() => {
     let active = true;
     async function load() {
+      setError("");
       try {
-        const token   = localStorage.getItem("fleetmark_access");
+        const token   = getAccessToken();
         const headers = { 
           Authorization: `Bearer ${token}`,
-          "X-API-Key": import.meta.env.VITE_API_KEY
         };
-        const [t, b, r, s, d, rv] = await Promise.all([
-          fetch(`${API_BASE}/trips/`,    { headers }),
-          fetch(`${API_BASE}/buses/`,    { headers }),
-          fetch(`${API_BASE}/routes/`,   { headers }),
-          fetch(`${API_BASE}/stations/`, { headers }),
-          fetch(`${API_BASE}/drivers/`,  { headers }),
-          fetch(`${API_BASE}/reservations/`, { headers }),
+        const [tRes, b, r, s, d, rv] = await Promise.all([
+          authFetch(`${API_BASE}/trips/`,    { headers }),
+          authFetch(`${API_BASE}/buses/`,    { headers }),
+          authFetch(`${API_BASE}/routes/`,   { headers }),
+          authFetch(`${API_BASE}/stations/`, { headers }),
+          authFetch(`${API_BASE}/drivers/`,  { headers }),
+          authFetch(`${API_BASE}/reservations/`, { headers }),
         ]);
-        if (!t.ok || !b.ok || !r.ok) throw new Error("Failed to load admin overview.");
-        const [tData, bData, rData] = await Promise.all([t.json(), b.json(), r.json()]);
+        if (!tRes.ok || !b.ok || !r.ok) throw new Error(t("ovLoadFailed"));
+        const [tData, bData, rData] = await Promise.all([tRes.json(), b.json(), r.json()]);
         const sData = s.ok ? await s.json() : [];
         const dData = d.ok ? await d.json() : [];
         const rvData = rv.ok ? await rv.json() : [];
@@ -73,7 +77,7 @@ export default function Overview() {
           setReservations(Array.isArray(rvData) ? rvData : []);
         }
       } catch (err) {
-        if (active) setError(err.message || "Unable to load overview.");
+        if (active) setError(err.message || t("ovLoadUnable"));
       } finally {
         if (active) setLoading(false);
       }
@@ -85,46 +89,55 @@ export default function Overview() {
       active = false;
       window.removeEventListener("fleetmark:refresh", onRefresh);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const activeTrips  = trips.filter((t) => !t.archived_at);
-  const totalSeats   = buses.reduce((sum, b) => sum + (b.seat_capacity || 0), 0);
-  const tonight      = activeTrips
-    .sort((a, b) => new Date(a.departure_datetime) - new Date(b.departure_datetime))
-    .slice(0, 8);
+  const tonight = useMemo(() => {
+    const [start, end] = tonightWindow();
+    return trips
+      .filter((t) => {
+        const d = new Date(t.departure_datetime);
+        return d >= start && d <= end;
+      })
+      .sort((a, b) => new Date(a.departure_datetime) - new Date(b.departure_datetime));
+  }, [trips]);
 
-  // ── Chart data: Seat occupancy per active trip ──────────────────────────
+  const bookedTonight = tonight.reduce((sum, t) => sum + Math.max(0, Number(t.bus_seat_capacity || 0) - Number(t.seats_left ?? 0)), 0);
+  const seatsTonight = tonight.reduce((sum, t) => sum + Number(t.bus_seat_capacity || 0), 0);
+
+  // ── Chart data: Seat occupancy per trip tonight ─────────────────────────
   const occupancyData = useMemo(() => {
-    return activeTrips.slice(0, 10).map((trip) => {
+    return tonight.map((trip) => {
       const cap = Number(trip.bus_seat_capacity || 0);
       const left = Number(trip.seats_left ?? 0);
-      const booked = Math.max(0, cap - left);
       return {
-        name: trip.route_name || trip.route || "Trip",
-        booked,
+        // Several routes leave at the same hour, so label by time + route.
+        name: `${timeOf(trip.departure_datetime)} ${(trip.route_name || "").replace(/ Route$/, "")}`,
+        booked: Math.max(0, cap - left),
         available: Math.max(0, left),
       };
     });
-  }, [activeTrips]);
+  }, [tonight]);
 
   // ── Chart data: Reservations by route (pie) ────────────────────────────
   const routeDistribution = useMemo(() => {
     const counts = {};
     reservations.forEach((r) => {
-      const name = r.route_name || r.trip_route_name || "Unknown";
+      const name = r.trip_details?.route_name || t("reportOther");
       counts[name] = (counts[name] || 0) + 1;
     });
     return Object.entries(counts).map(([name, value]) => ({ name, value }));
-  }, [reservations]);
+  }, [reservations, t]);
 
-  const animatedActiveTrips = useCountUp(activeTrips.length);
-  const animatedTotalSeats = useCountUp(totalSeats);
+  const animatedTonight = useCountUp(tonight.length);
+  const animatedBooked = useCountUp(bookedTonight);
   const animatedRoutes = useCountUp(routes.length);
 
   const kpis = [
-    { label: "Active trips",  value: String(animatedActiveTrips),  sub: "non-archived",    ...KPI_ICONS[0] },
-    { label: "Total seats",   value: String(animatedTotalSeats),   sub: "across all buses", ...KPI_ICONS[1] },
-    { label: "Routes",        value: String(animatedRoutes),       sub: "configured",       ...KPI_ICONS[2] },
+    { label: t("ovTripsTonight"), value: String(animatedTonight), sub: "21:00 → 06:00", ...KPI_ICONS[0] },
+    { label: t("ovSeatsBookedTonight"), value: String(animatedBooked), sub: seatsTonight ? t("ovOfSeats").replace("{{n}}", seatsTonight) : t("ovNoTripsTonightSub"), ...KPI_ICONS[1] },
+    { label: t("navRoutes"), value: String(animatedRoutes), sub: t("ovStationsCount").replace("{{n}}", stationsCount), ...KPI_ICONS[2] },
   ];
 
   // Workflow guide steps — in dependency order
@@ -137,6 +150,11 @@ export default function Overview() {
   ];
   const doneCount = steps.filter((s) => s.done).length;
   const showGuide = doneCount < 5;
+
+  // A fully set-up system shouldn't show "Step N complete" banners on every page.
+  useEffect(() => {
+    if (!loading && !showGuide) localStorage.setItem("fleetmark_setup_dismissed", "true");
+  }, [loading, showGuide]);
   // First incomplete step is the "next" action
   const nextStepIndex = steps.findIndex((s) => !s.done);
 
@@ -152,7 +170,7 @@ export default function Overview() {
   }
 
   if (error && !trips.length) {
-    return <EmptyState icon="error" title="Overview unavailable" subtitle={error} />;
+    return <EmptyState icon="error" title={t("ovUnavailable")} subtitle={error} />;
   }
 
   return (
@@ -198,12 +216,12 @@ export default function Overview() {
             >
               <h3 style={{ margin: "0 0 16px", fontSize: 14, fontWeight: 700 }}>
                 <span className="material-symbols-outlined" style={{ fontSize: 16, verticalAlign: "middle", marginRight: 6, color: "var(--blue)" }}>bar_chart</span>
-                Seat Occupancy by Trip
+                {t("ovOccupancyTitle")}
               </h3>
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={occupancyData} margin={{ top: 4, right: 12, left: -12, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--line, #e5e7eb)" />
-                  <XAxis dataKey="name" tick={{ fontSize: 11, fill: "var(--mid)" }} />
+                  <XAxis dataKey="name" tick={{ fontSize: 10, fill: "var(--mid)" }} interval={0} angle={-30} textAnchor="end" height={60} />
                   <YAxis tick={{ fontSize: 11, fill: "var(--mid)" }} allowDecimals={false} />
                   <Tooltip
                     contentStyle={{
@@ -214,8 +232,8 @@ export default function Overview() {
                     }}
                   />
                   <Legend wrapperStyle={{ fontSize: 12 }} />
-                  <Bar dataKey="booked" stackId="seats" fill="#6366f1" name="Booked" radius={[0, 0, 0, 0]} />
-                  <Bar dataKey="available" stackId="seats" fill="#22c55e" name="Available" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="booked" stackId="seats" fill="#6366f1" name={t("chartBooked")} radius={[0, 0, 0, 0]} />
+                  <Bar dataKey="available" stackId="seats" fill="color-mix(in srgb, var(--mid) 22%, transparent)" name={t("chartFree")} radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </article>
@@ -233,7 +251,7 @@ export default function Overview() {
             >
               <h3 style={{ margin: "0 0 16px", fontSize: 14, fontWeight: 700 }}>
                 <span className="material-symbols-outlined" style={{ fontSize: 16, verticalAlign: "middle", marginRight: 6, color: "var(--amber)" }}>pie_chart</span>
-                Reservations by Route
+                {t("ovByRouteTitle")}
               </h3>
               <ResponsiveContainer width="100%" height={220}>
                 <PieChart>
@@ -245,9 +263,7 @@ export default function Overview() {
                     cy="50%"
                     outerRadius={75}
                     innerRadius={40}
-                    paddingAngle={2}
-                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                    labelLine={{ stroke: "var(--mid)" }}
+                    paddingAngle={routeDistribution.length > 1 ? 2 : 0}
                     style={{ fontSize: 11 }}
                   >
                     {routeDistribution.map((_, i) => (
@@ -262,6 +278,7 @@ export default function Overview() {
                       fontSize: 12,
                     }}
                   />
+                  <Legend wrapperStyle={{ fontSize: 12 }} formatter={(name, entry) => `${name} · ${entry.payload.value}`} />
                 </PieChart>
               </ResponsiveContainer>
             </article>
@@ -387,17 +404,17 @@ export default function Overview() {
 
       {/* Tonight's trips table */}
       <section className="animate-in" style={{ display: "grid", gap: "var(--space-4)" }}>
-        <PageHeader title="Tonight's Trips" subtitle="Upcoming non-archived departures, sorted by time" />
+        <PageHeader title={t("tonightsTrips")} subtitle={t("ovTonightSub")} />
         {!tonight.length ? (
-          <EmptyState icon="event_seat" title="No trips scheduled" subtitle="Create a trip from the Trips page." />
+          <EmptyState icon="event_seat" title={t("ovNoTripsTitle")} subtitle={t("ovNoTripsSub")} />
         ) : (
           <DataTable>
             <thead>
               <tr>
-                <th scope="col">Departure</th>
-                <th scope="col">Route</th>
-                <th scope="col">Bus</th>
-                <th scope="col">Seats</th>
+                <th scope="col">{t("colDeparture")}</th>
+                <th scope="col">{t("colRoute")}</th>
+                <th scope="col">{t("bus")}</th>
+                <th scope="col">{t("colSeats")}</th>
               </tr>
             </thead>
             <tbody>
@@ -407,7 +424,7 @@ export default function Overview() {
                 return (
                   <tr key={trip.id} className="animate-in">
                     <td className="td-mono">
-                      {new Date(trip.departure_datetime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                      {timeOf(trip.departure_datetime)}
                       <div
                         style={{
                           fontSize: "var(--font-size-xs)",
@@ -415,7 +432,7 @@ export default function Overview() {
                           marginTop: 2,
                         }}
                       >
-                        {new Date(trip.departure_datetime).toLocaleDateString()}
+                        {fmtDate(trip.departure_datetime)}
                       </div>
                     </td>
                     <td style={{ fontWeight: "var(--font-semibold)" }}>
@@ -424,7 +441,7 @@ export default function Overview() {
                     <td className="td-secondary">{trip.bus_name || "—"}</td>
                     <td>
                       <Badge variant={getSeatsStatus(left, cap)}>
-                        {cap > 0 ? `${left} / ${cap}` : left >= 0 ? `${left} left` : "—"}
+                        {cap > 0 ? t("ovBookedFree").replace("{{booked}}", cap - left).replace("{{free}}", left) : t("ovFree").replace("{{free}}", left)}
                       </Badge>
                     </td>
                   </tr>

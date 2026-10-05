@@ -140,3 +140,11 @@ class ReservationAPITests(APITestCase):
 		r2 = self.client.post(self.list_url, {'trip': str(trip_b.id)}, format='json')
 		self.assertEqual(r2.status_code, status.HTTP_400_BAD_REQUEST)
 		self.assertEqual(Reservation.objects.filter(student=self.user).count(), 1)
+
+	def test_six_am_trip_counts_as_the_same_night(self):
+		# 21:00 and the next morning's 06:00 are one service night: one seat only.
+		evening = Trip.objects.create(route=self.route, bus=self.bus, driver=self.driver, departure_datetime='2026-01-01T21:00:00+01:00')
+		morning = Trip.objects.create(route=self.route, bus=self.bus, driver=self.driver, departure_datetime='2026-01-02T06:00:00+01:00')
+		self.assertEqual(self.client.post(self.list_url, {'trip': str(evening.id)}, format='json').status_code, status.HTTP_201_CREATED)
+		resp = self.client.post(self.list_url, {'trip': str(morning.id)}, format='json')
+		self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)

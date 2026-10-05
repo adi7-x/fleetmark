@@ -1,931 +1,518 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { auth } from "../services/api";
+import { useTranslation } from "../context/TranslationContext";
 import LanguageSwitcher from "../components/shared/LanguageSwitcher";
-import DarkModeToggle from "../components/ui/DarkModeToggle";
-import FleetmarkLogoAnimation from "../components/ui/FleetmarkLogoAnimation";
 import useInView from "../hooks/useInView";
 
-function RevealSection({ id, children, style, className = "" }) {
+function RevealSection({ id, children, className = "" }) {
   const [ref, visible] = useInView();
   return (
-    <section
-      id={id}
-      ref={ref}
-      className={`reveal-section${visible ? " is-visible" : ""} ${className}`.trim()}
-      style={style}
-    >
+    <section id={id} ref={ref} className={`reveal-section${visible ? " is-visible" : ""} ${className}`.trim()}>
       {children}
     </section>
   );
 }
 
-/** Stylized bus + road — hero visual (Fix 8b) */
-function HeroBusIllustration() {
-  return (
-    <svg
-      width="min(100%, 420)"
-      height="140"
-      viewBox="0 0 420 140"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      aria-hidden="true"
-      style={{ maxWidth: 420, marginTop: 8 }}
-    >
-      <defs>
-        <linearGradient id="hero-road" x1="0" y1="0" x2="420" y2="0">
-          <stop offset="0%" stopColor="var(--blue)" stopOpacity="0.12" />
-          <stop offset="100%" stopColor="var(--orbit, #7e22ce)" stopOpacity="0.08" />
-        </linearGradient>
-      </defs>
-      <rect x="0" y="108" width="420" height="4" rx="2" fill="url(#hero-road)" />
-      <line x1="0" y1="110" x2="420" y2="110" stroke="var(--line2)" strokeWidth="1" strokeDasharray="10 14" opacity="0.6" />
-      <g style={{ transform: "translateX(0)" }}>
-        <rect x="120" y="52" width="180" height="48" rx="10" fill="var(--surface)" stroke="var(--blue)" strokeWidth="1.5" />
-        <rect x="132" y="62" width="36" height="16" rx="3" fill="color-mix(in srgb, var(--blue) 15%, transparent)" />
-        <rect x="176" y="62" width="36" height="16" rx="3" fill="color-mix(in srgb, var(--blue) 15%, transparent)" />
-        <rect x="220" y="62" width="36" height="16" rx="3" fill="color-mix(in srgb, var(--blue) 15%, transparent)" />
-        <rect x="264" y="62" width="24" height="16" rx="3" fill="color-mix(in srgb, var(--blue) 15%, transparent)" />
-        <circle cx="150" cy="108" r="10" fill="var(--surface2)" stroke="var(--blue)" strokeWidth="1.5" />
-        <circle cx="270" cy="108" r="10" fill="var(--surface2)" stroke="var(--blue)" strokeWidth="1.5" />
-        <circle cx="300" cy="36" r="5" fill="var(--amber)" opacity="0.85" />
-        <circle cx="320" cy="28" r="3" fill="var(--mid)" opacity="0.5" />
-        <circle cx="100" cy="44" r="2.5" fill="var(--mid)" opacity="0.35" />
-      </g>
-    </svg>
-  );
-}
-
-/** English-first landing copy; fr/ar reuse English for long-form sections where not translated. */
+/** Landing copy (en/fr). Route names are proper nouns and stay in English in both. */
 const copy = {
   en: {
     navHow: "How it works",
     navSchedule: "Schedule",
     navTeam: "Team",
     navSignIn: "Sign in with 42",
-    heroBadge: "Now accepting reservations · 1337 School",
+    menuOpen: "Open menu",
+    menuClose: "Close menu",
+    heroBadge: "Student project · 1337 School",
     heroA: "Night shuttle.",
     heroB: "Reserved.",
     heroText:
-      "The official booking platform for 1337 School students. Sign in once with 42 Intra — your seat confirmed before you leave campus.",
-    heroBtnPrimary: "Sign in with 42 →",
-    heroBtnSecondary: "How it works →",
+      "A night-shuttle booking app built by 1337 students, for 1337 students. Sign in once with 42 Intra — your seat confirmed before you leave campus.",
+    heroBtnPrimary: "Sign in with 42",
+    heroBtnSecondary: "How it works",
+    boardTitle: "Nightly departures · from 1337",
+    boardBadge: "EVERY NIGHT",
+    board: [
+      { time: "21:00", route: "OCP Route + Coin Blue Route", path: "2 buses · again at 22:00", tag: "PEAK", status: "reserved" },
+      { time: "23:00", route: "Unified Night Route", path: "1 bus · again at 00:00", tag: "MIDNIGHT", status: "boarding" },
+      { time: "01:00", route: "OCP Route + Coin Blue Route", path: "2 buses · split routes", tag: "PEAK", status: "reserved" },
+      { time: "03:00", route: "Unified Night Route", path: "Hourly until 06:00", tag: "LATE NIGHT", status: "late" },
+    ],
+    statsLabel: "Fleetmark at a glance",
     heroStats: [
-      { value: "400+", label: "STUDENTS" },
-      { value: "2", label: "ROUTES" },
-      { value: "21PM", label: "FIRST BUS" },
-      { value: "6AM", label: "LAST BUS" },
+      { value: "3", label: "ROUTES" },
+      { value: "1", label: "SEAT / NIGHT" },
+      { value: "21:00", label: "FIRST BUS" },
+      { value: "06:00", label: "LAST BUS" },
     ],
     howEyebrow: "HOW IT WORKS",
-    howTitle: "Three steps. One guaranteed seat.",
+    howTitle: "Four steps. One seat, confirmed.",
     howSteps: [
-      {
-        title: "Sign in with 42 Intra",
-        lines: ["No new account. Your 1337 credentials work instantly."],
-      },
-      {
-        title: "Pick your home stop",
-        lines: ["Choose from stations across Ben Guerir.", "Only trips near you are shown."],
-      },
-      {
-        title: "Reserve your seat",
-        lines: ["One tap. Confirmed instantly. No more rushing."],
-      },
-      {
-        title: "Show up and ride",
-        lines: ["Your seat is waiting. Board the shuttle."],
-      },
+      { title: "Sign in with 42 Intra", lines: ["No new account. Your 1337 credentials work instantly."] },
+      { title: "Pick your home stop", lines: ["Choose from stations across Ben Guerir. Only trips that serve your stop are shown."] },
+      { title: "Reserve your seat", lines: ["One seat per night, confirmed instantly. Cancel any time before departure."] },
+      { title: "Show up and ride", lines: ["Your seat is waiting. Board the shuttle at 1337."] },
     ],
+    pass: {
+      brand: "Fleetmark · Boarding pass",
+      route: "Night Shuttle — OCP Route",
+      cells: ["50 seats", "22:00", "18 stops"],
+      confirm: "Seat confirmed · OCP Route · 22:00",
+    },
     schedEyebrow: "SCHEDULE",
     schedTitle: "Runs all night. Every night.",
-    schedDesc: "Two service windows with a break between 1:00 AM and 3:00 AM",
+    schedDesc: "Departures every hour from 21:00 to 06:00. No departure at 02:00.",
     schedBlocks: [
-      {
-        bar: "var(--blue)",
-        label: "PEAK HOURS",
-        time: "21:00 → Midnight",
-        icon: "bolt",
-        cardTitle: "Peak Hours — Split Routes",
-        desc: "Two buses on separate routes for peak traffic.",
-        tags: ["🚌 Bus 1 — Route A", "🚌 Bus 2 — Route B"],
-      },
-      {
-        bar: "var(--mid)",
-        label: "TRANSITION",
-        time: "12:00 AM → 1:00 AM",
-        icon: "update",
-        cardTitle: "Transition Window",
-        desc: "Both buses serve all major stops.",
-        tags: ["🔄 Both buses", "Full coverage"],
-      },
-      {
-        bar: "var(--orbit)",
-        label: "LATE NIGHT",
-        time: "3:00 AM → 6:00 AM",
-        icon: "dark_mode",
-        cardTitle: "Late Night — Consolidated Run",
-        desc: "One bus covers all stops for late students.",
-        tags: ["🚌 1 bus", "All stops served"],
-      },
+      { tone: "aurora", label: "PEAK", time: "21:00 · 22:00 · 01:00", icon: "bolt", cardTitle: "Split routes", desc: "Two buses leave together: OCP Route and Coin Blue Route.", tags: ["2 buses", "OCP Route", "Coin Blue Route"] },
+      { tone: "sodium", label: "MIDNIGHT", time: "23:00 · 00:00", icon: "update", cardTitle: "Unified run", desc: "One bus covers every stop of both routes.", tags: ["1 bus", "All stops"] },
+      { tone: "muted", label: "LATE NIGHT", time: "03:00 → 06:00", icon: "dark_mode", cardTitle: "Hourly unified run", desc: "One bus every hour for students who stay late.", tags: ["1 bus", "Hourly"] },
     ],
     teamEyebrow: "THE TEAM",
     teamTitle: "Built by 1337 students, for 1337 students.",
     teamSubtitle: "Five students set out to build a smart system for managing their school's bus transportation.",
     teamMembers: [
-      {
-        name: "Adil Bourji",
-        role: "Frontend Developer",
-        skills: "React · TypeScript · Vite · Design System",
-      },
-      {
-        name: "Mohamed Lahrech",
-        role: "Backend Developer",
-        skills: "Django REST · PostgreSQL · API Architecture",
-      },
-      {
-        name: "Abderrahman Chakour",
-        role: "Backend · Auth",
-        skills: "42 OAuth · JWT · Security · SimpleJWT",
-      },
-      {
-        name: "Ayoub El Haouti",
-        role: "Backend · QA",
-        skills: "Testing · Django · 86/86 passing",
-      },
-      {
-        name: "Aamir Tahtah",
-        role: "DevOps",
-        skills: "Docker · Nginx · Prometheus · Grafana",
-      },
+      { name: "Adil Bourji", role: "Frontend Developer", skills: "React · Vite · Design System" },
+      { name: "Mohamed Lahrech", role: "Backend Developer", skills: "Django REST · PostgreSQL · API" },
+      { name: "Abderrahman Chakour", role: "Backend · Auth", skills: "42 OAuth · JWT · Security" },
+      { name: "Ayoub El Haouti", role: "Backend · QA", skills: "Testing · Django · Pytest" },
+      { name: "Aamir Tahtah", role: "DevOps", skills: "Docker · Nginx · ELK" },
     ],
     gsEyebrow: "GET STARTED",
     gsTitle: "Your seat is waiting. Claim it now.",
-    gsSteps: [
-      "Authenticate with your 42 Intra account",
-      "Your role is detected automatically",
-      "Pick your home stop and start reserving",
-    ],
+    gsSteps: ["Authenticate with your 42 Intra account", "Your role is detected automatically", "Pick your home stop and start reserving"],
     gsCardTitle: "Access Fleetmark",
     gsCardSub: "1337 School Ben Guerir only. Your role is detected automatically.",
-    gsBtn: "Sign in with 42 Intra →",
+    gsBtn: "Sign in with 42 Intra",
     gsSecured: "secured by 42 OAuth",
     gsChips: ["No new account", "Instant access", "Auto role detect", "1337 only"],
     gsFootTag: "1337 School · Ben Guerir · Morocco",
     footerSub: "Night shuttle reservation · 1337 School Morocco",
     footerCopy: "© 2026 · Built by 1337/42 students",
     footerTech: "React · Django · PostgreSQL · Docker · 42 OAuth",
+    privacy: "Privacy Policy",
+    terms: "Terms of Service",
   },
   fr: {
     navHow: "Fonctionnement",
     navSchedule: "Horaires",
-    navTeam: "Equipe",
+    navTeam: "Équipe",
     navSignIn: "Connexion 42",
-    heroBadge: "Réservations ouvertes · 1337 School",
+    menuOpen: "Ouvrir le menu",
+    menuClose: "Fermer le menu",
+    heroBadge: "Projet étudiant · 1337 School",
     heroA: "Navette de nuit.",
     heroB: "Réservée.",
     heroText:
-      "Plateforme officielle pour les étudiants 1337. Une connexion 42 Intra — votre place confirmée avant de quitter le campus.",
-    heroBtnPrimary: "Connexion 42 →",
-    heroBtnSecondary: "Fonctionnement →",
+      "Une application de réservation de navette de nuit, créée par des étudiants 1337 pour les étudiants 1337. Une connexion 42 Intra — votre place confirmée avant de quitter le campus.",
+    heroBtnPrimary: "Connexion 42",
+    heroBtnSecondary: "Fonctionnement",
+    boardTitle: "Départs chaque nuit · depuis 1337",
+    boardBadge: "CHAQUE NUIT",
+    board: [
+      { time: "21:00", route: "OCP Route + Coin Blue Route", path: "2 bus · aussi à 22:00", tag: "POINTE", status: "reserved" },
+      { time: "23:00", route: "Unified Night Route", path: "1 bus · aussi à 00:00", tag: "MINUIT", status: "boarding" },
+      { time: "01:00", route: "OCP Route + Coin Blue Route", path: "2 bus · lignes séparées", tag: "POINTE", status: "reserved" },
+      { time: "03:00", route: "Unified Night Route", path: "Toutes les heures jusqu'à 06:00", tag: "FIN DE NUIT", status: "late" },
+    ],
+    statsLabel: "Fleetmark en bref",
     heroStats: [
-      { value: "400+", label: "ÉTUDIANTS" },
-      { value: "2", label: "LIGNES" },
-      { value: "21h", label: "PREMIER BUS" },
-      { value: "6h", label: "DERNIER BUS" },
+      { value: "3", label: "LIGNES" },
+      { value: "1", label: "PLACE / NUIT" },
+      { value: "21:00", label: "PREMIER BUS" },
+      { value: "06:00", label: "DERNIER BUS" },
     ],
     howEyebrow: "COMMENT ÇA MARCHE",
-    howTitle: "Trois étapes. Une place assurée.",
+    howTitle: "Quatre étapes. Une place confirmée.",
+    howSteps: [
+      { title: "Connexion avec 42 Intra", lines: ["Pas de nouveau compte. Vos identifiants 1337 suffisent."] },
+      { title: "Choisissez votre arrêt", lines: ["Stations dans tout Ben Guerir. Seuls les trajets qui desservent votre arrêt s'affichent."] },
+      { title: "Réservez votre place", lines: ["Une place par nuit, confirmée tout de suite. Annulable avant le départ."] },
+      { title: "Montez et partez", lines: ["Votre place vous attend. Embarquez à 1337."] },
+    ],
+    pass: {
+      brand: "Fleetmark · Carte d'embarquement",
+      route: "Navette de nuit — OCP Route",
+      cells: ["50 places", "22:00", "18 arrêts"],
+      confirm: "Place confirmée · OCP Route · 22:00",
+    },
     schedEyebrow: "HORAIRES",
     schedTitle: "Toute la nuit. Chaque nuit.",
-    schedDesc: "Deux fenêtres de service avec une pause entre 1h00 et 3h00",
+    schedDesc: "Un départ chaque heure de 21:00 à 06:00. Pas de départ à 02:00.",
+    schedBlocks: [
+      { tone: "aurora", label: "POINTE", time: "21:00 · 22:00 · 01:00", icon: "bolt", cardTitle: "Lignes séparées", desc: "Deux bus partent ensemble : OCP Route et Coin Blue Route.", tags: ["2 bus", "OCP Route", "Coin Blue Route"] },
+      { tone: "sodium", label: "MINUIT", time: "23:00 · 00:00", icon: "update", cardTitle: "Ligne unique", desc: "Un seul bus dessert tous les arrêts des deux lignes.", tags: ["1 bus", "Tous les arrêts"] },
+      { tone: "muted", label: "FIN DE NUIT", time: "03:00 → 06:00", icon: "dark_mode", cardTitle: "Ligne unique, chaque heure", desc: "Un bus chaque heure pour ceux qui restent tard.", tags: ["1 bus", "Chaque heure"] },
+    ],
+    teamMembers: [
+      { name: "Adil Bourji", role: "Développeur Frontend", skills: "React · Vite · Design System" },
+      { name: "Mohamed Lahrech", role: "Développeur Backend", skills: "Django REST · PostgreSQL · API" },
+      { name: "Abderrahman Chakour", role: "Backend · Auth", skills: "42 OAuth · JWT · Sécurité" },
+      { name: "Ayoub El Haouti", role: "Backend · QA", skills: "Tests · Django · Pytest" },
+      { name: "Aamir Tahtah", role: "DevOps", skills: "Docker · Nginx · ELK" },
+    ],
     teamEyebrow: "L'ÉQUIPE",
     teamTitle: "Construit par des étudiants 1337, pour des étudiants 1337.",
-    teamSubtitle: "Cinq étudiants se sont lancés dans la création d’un système intelligent pour gérer le transport scolaire.",
+    teamSubtitle: "Cinq étudiants se sont lancés dans la création d'un système intelligent pour gérer le transport scolaire.",
     gsEyebrow: "COMMENCER",
     gsTitle: "Votre place vous attend. Réclamez-la.",
-    gsSteps: [
-      "Authentification avec votre compte 42 Intra",
-      "Votre rôle est détecté automatiquement",
-      "Choisissez votre arrêt et réservez",
-    ],
+    gsSteps: ["Authentification avec votre compte 42 Intra", "Votre rôle est détecté automatiquement", "Choisissez votre arrêt et réservez"],
     gsCardTitle: "Accéder à Fleetmark",
     gsCardSub: "1337 School Ben Guerir uniquement. Rôle détecté automatiquement.",
-    gsBtn: "Connexion 42 Intra →",
+    gsBtn: "Connexion 42 Intra",
     gsSecured: "sécurisé par OAuth 42",
     gsChips: ["Pas de nouveau compte", "Accès instantané", "Détection du rôle", "1337 uniquement"],
     gsFootTag: "1337 School · Ben Guerir · Maroc",
     footerSub: "Réservation navette nocturne · 1337 School Maroc",
     footerCopy: "© 2026 · Réalisé par des étudiants 1337/42",
     footerTech: "React · Django · PostgreSQL · Docker · OAuth 42",
-  },
-  ar: {
-    navHow: "كيف يعمل",
-    navSchedule: "الجدول",
-    navTeam: "الفريق",
-    navSignIn: "تسجيل الدخول عبر 42",
-    heroBadge: "نقبل الحجوزات الآن · مدرسة 1337",
-    heroA: "رحلات ليلية.",
-    heroB: "محجوزة.",
-    heroText:
-      "منصة الحجز الرسمية لطلاب 1337. سجّل الدخول مرة واحدة عبر 42 Intra — مقعدك مؤكد قبل مغادرة الحرم.",
-    heroBtnPrimary: "تسجيل الدخول عبر 42 ←",
-    heroBtnSecondary: "كيف يعمل ←",
-    heroStats: [
-      { value: "400+", label: "طالب" },
-      { value: "2", label: "خطوط" },
-      { value: "9م", label: "أول حافلة" },
-      { value: "6ص", label: "آخر حافلة" },
-    ],
-    howEyebrow: "كيف يعمل",
-    howTitle: "ثلاث خطوات. مقعد مضمون.",
-    schedEyebrow: "الجدول",
-    schedTitle: "يعمل طوال الليل. كل ليلة.",
-    schedDesc: "فترتا خدمة مع استراحة عند الساعة 2:00 صباحًا",
-    teamEyebrow: "الفريق",
-    teamTitle: "من طلاب 1337، لطلاب 1337.",
-    teamSubtitle: "خمسة طلاب قرروا تطوير نظام ذكي لإدارة حافلات مدرستهم",
-    gsEyebrow: "ابدأ",
-    gsTitle: "مقعدك ينتظرك. احجزه الآن.",
-    gsSteps: [
-      "الدخول بحساب 42 Intra",
-      "يتم اكتشاف دورك تلقائياً",
-      "اختر محطتك وابدأ الحجز",
-    ],
-    gsCardTitle: "الدخول إلى Fleetmark",
-    gsCardSub: "مدرسة 1337 بني جرير فقط. يتم اكتشاف الدور تلقائياً.",
-    gsBtn: "تسجيل الدخول عبر 42 Intra ←",
-    gsSecured: "مؤمّن عبر OAuth 42",
-    gsChips: ["بدون حساب جديد", "وصول فوري", "اكتشاف الدور", "1337 فقط"],
-    gsFootTag: "1337 School · بني جرير · المغرب",
-    footerSub: "حجز الحافلة الليلية · 1337 School المغرب",
-    footerCopy: "© 2026 · من طلاب 1337/42",
-    footerTech: "React · Django · PostgreSQL · Docker · OAuth 42",
+    privacy: "Confidentialité",
+    terms: "Conditions d'utilisation",
   },
 };
 
-// Share nested data with EN where we don't translate (steps / schedule blocks / team roster)
-copy.fr.howSteps = copy.en.howSteps;
-copy.fr.schedBlocks = copy.en.schedBlocks;
-copy.fr.teamMembers = copy.en.teamMembers;
-copy.ar.howSteps = copy.en.howSteps;
-copy.ar.schedBlocks = copy.en.schedBlocks;
-copy.ar.teamMembers = copy.en.teamMembers;
+// Shown when the OAuth callback bounces back with ?auth_error=<code>.
+const AUTH_ERRORS = {
+  en: {
+    denied: "Sign-in was cancelled on 42. Try again when you're ready.",
+    expired: "Your sign-in took too long or was opened in another tab. Please try again.",
+    provider: "42 Intra couldn't complete the sign-in right now. Please try again in a minute.",
+    blocked: "This account has been deactivated. Contact the logistics team.",
+    start: "Couldn't start the sign-in. Check your connection and try again.",
+  },
+  fr: {
+    denied: "Connexion annulée sur 42. Réessayez quand vous voulez.",
+    expired: "La connexion a expiré ou a été ouverte dans un autre onglet. Réessayez.",
+    provider: "42 Intra n'a pas pu terminer la connexion. Réessayez dans une minute.",
+    blocked: "Ce compte a été désactivé. Contactez l'équipe logistique.",
+    start: "Impossible de lancer la connexion. Vérifiez votre réseau et réessayez.",
+  },
+};
 
-const wrap = { maxWidth: 1200, margin: "0 auto", padding: "0 32px" };
+const toneColor = { aurora: "var(--aurora)", sodium: "var(--sodium)", muted: "var(--n-mid)" };
 
-function scrollToHow(e) {
+function scrollToId(e, id) {
   e.preventDefault();
-  document.getElementById("how-it-works")?.scrollIntoView({ behavior: "smooth" });
+  document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
 }
 
 export default function Landing() {
-  const [lang, setLang] = useState(localStorage.getItem("fleetmark_lang") || "en");
-  const [error, setError] = useState("");
-  const [splashVisible, setSplashVisible] = useState(true);
+  // Shared with the app so the language picked here survives sign-in.
+  const { lang, setLang } = useTranslation();
+  // Keep the code, not the message, so the banner follows language switches.
+  const [errorCode, setErrorCode] = useState(() => new URLSearchParams(window.location.search).get("auth_error") || "");
   const [menuOpen, setMenuOpen] = useState(false);
   const text = useMemo(() => copy[lang] || copy.en, [lang]);
+  const errors = AUTH_ERRORS[lang] || AUTH_ERRORS.en;
+  const error = errorCode ? errors[errorCode] || errors.provider : "";
 
+  // Escape closes the mobile menu.
   useEffect(() => {
-    localStorage.setItem("fleetmark_lang", lang);
-    document.documentElement.setAttribute("data-lang", lang);
-  }, [lang]);
+    if (!menuOpen) return undefined;
+    const onKey = (e) => e.key === "Escape" && setMenuOpen(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [menuOpen]);
 
   async function login() {
-    setError("");
+    setErrorCode("");
+    if (window.location.search) window.history.replaceState(null, "", "/");
     try {
       const res = await auth.getLoginUrl();
       if (!res?.authorization_url) throw new Error("Missing OAuth URL.");
       window.location.href = res.authorization_url;
-    } catch (err) {
-      setError(err.message || "Failed to start authentication.");
+    } catch {
+      setErrorCode("start"); // apiCall already logs the technical error
     }
   }
 
-  const [navBusVisible, setNavBusVisible] = useState(false);
-
   return (
-    <div style={{ width: "100%", minHeight: "100vh", background: "var(--bg)", color: "var(--ink)" }}>
-      {/* Splash — logo animation only; hero uses static wordmark (Fix 4a) */}
-      {splashVisible ? (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 100,
-            display: "grid",
-            placeItems: "center",
-            background: "var(--bg)",
-          }}
-        >
-          <FleetmarkLogoAnimation
-            onBusDone={() => {
-              setSplashVisible(false);
-              setNavBusVisible(true);
-            }}
-          />
-        </div>
-      ) : null}
-
-      <nav
-        style={{
-          position: "fixed",
-          top: 0,
-          left: 0,
-          right: 0,
-          zIndex: 50,
-          background: "color-mix(in srgb, var(--bg) 60%, transparent)",
-          backdropFilter: "blur(12px)",
-          borderBottom: "1px solid var(--line2)",
-        }}
-      >
-        <div style={{ ...wrap, height: 56, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 32 }}>
-            <span style={{ fontSize: 22, fontWeight: 800, letterSpacing: "-0.03em", display: "inline-flex", alignItems: "center", gap: 8 }}>
-              <svg
-                width="26" height="12" viewBox="0 0 92 42" fill="none"
-                xmlns="http://www.w3.org/2000/svg" aria-hidden="true"
-                style={{
-                  opacity: navBusVisible ? 1 : 0,
-                  transform: navBusVisible ? "scale(1) translateY(0)" : "scale(0.4) translateY(8px)",
-                  transition: "opacity 0.5s ease, transform 0.5s cubic-bezier(0.34,1.56,0.64,1)",
-                  filter: navBusVisible ? "drop-shadow(0 0 6px rgba(99,102,241,0.5))" : "none",
-                }}
-              >
-                <rect x="2" y="3" width="78" height="26" rx="5" fill="var(--card)" stroke="var(--blue)" strokeWidth="1.5"/>
-                <rect x="7" y="8" width="56" height="12" rx="2.5" fill="var(--bg)" opacity="0.85"/>
-                <rect x="68" y="3" width="12" height="26" rx="3.5" fill="var(--card)" stroke="var(--blue)" strokeWidth="0.8" opacity="0.6"/>
-                <rect x="72" y="12" width="7" height="5" rx="1.5" fill="var(--blue)"/>
-                <circle cx="18" cy="34" r="6.5" fill="var(--card)" stroke="var(--blue)" strokeWidth="1.2"/>
-                <circle cx="62" cy="34" r="6.5" fill="var(--card)" stroke="var(--blue)" strokeWidth="1.2"/>
-              </svg>
-              <span style={{ color: navBusVisible ? "var(--blue)" : "inherit", transition: "color 0.5s ease" }} dir="ltr">Fleetmark</span>
+    <div className="nocturne">
+      {/* ─────────── NAV ─────────── */}
+      <nav className="noc-nav">
+        <div className="noc-wrap noc-nav__inner">
+          <div className="noc-nav__left">
+            <span className="noc-brand ltr">
+              <span className="noc-brand__mark" aria-hidden="true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                  <path d="M5 11l1.5-4.5A2 2 0 018.4 5h7.2a2 2 0 011.9 1.5L19 11v6a1 1 0 01-1 1h-1a1 1 0 01-1-1v-1H8v1a1 1 0 01-1 1H6a1 1 0 01-1-1v-6z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"/>
+                  <circle cx="8" cy="15" r="1" fill="currentColor"/><circle cx="16" cy="15" r="1" fill="currentColor"/>
+                </svg>
+              </span>
+              Fleetmark
             </span>
-            <div className="landing-nav-links" style={{ display: "flex", gap: 24, fontSize: 14, color: "var(--mid)" }}>
-              <a href="#how-it-works">{text.navHow}</a>
-              <a href="#schedule">{text.navSchedule}</a>
-              <a href="#team">{text.navTeam}</a>
+            <div className="noc-nav__links">
+              <a href="#how-it-works" onClick={(e) => scrollToId(e, "how-it-works")}>{text.navHow}</a>
+              <a href="#schedule" onClick={(e) => scrollToId(e, "schedule")}>{text.navSchedule}</a>
+              <a href="#team" onClick={(e) => scrollToId(e, "team")}>{text.navTeam}</a>
             </div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div className="noc-nav__right">
             <button
               type="button"
-              className="landing-hamburger"
+              className="noc-hamburger"
               aria-expanded={menuOpen}
-              aria-label="Open menu"
+              aria-controls="noc-mobile-menu"
+              aria-label={menuOpen ? text.menuClose : text.menuOpen}
               onClick={() => setMenuOpen((o) => !o)}
-              style={{
-                display: "none",
-                placeItems: "center",
-                width: 40,
-                height: 40,
-                borderRadius: 10,
-                border: "1px solid var(--line2)",
-                background: "var(--surface)",
-                color: "var(--ink)",
-                cursor: "pointer",
-              }}
             >
-              <span className="material-symbols-outlined" style={{ fontSize: 22 }}>{menuOpen ? "close" : "menu"}</span>
+              <span className="material-symbols-outlined" aria-hidden="true">{menuOpen ? "close" : "menu"}</span>
             </button>
-
-            <LanguageSwitcher variant="full" value={lang} onChange={setLang} />
-            <DarkModeToggle />
-            <button
-              type="button"
-              onClick={login}
-              style={{
-                border: "1px solid var(--blue-bdr)",
-                background: "var(--blue-bg)",
-                color: "var(--blue)",
-                borderRadius: 7,
-                padding: "8px 14px",
-                fontWeight: 700,
-                cursor: "pointer",
-              }}
-            >
+            {/* No theme toggle here: the landing is always dark, so it had no visible effect. */}
+            <span className="noc-lang"><LanguageSwitcher value={lang} onChange={setLang} /></span>
+            <button type="button" className="noc-btn noc-btn--outline noc-btn--sm" onClick={login}>
               {text.navSignIn}
             </button>
           </div>
         </div>
       </nav>
 
-      <div className={`landing-mobile-menu${menuOpen ? " open" : ""}`}>
-        <a href="#how-it-works" onClick={() => setMenuOpen(false)}>{text.navHow}</a>
-        <a href="#schedule" onClick={() => setMenuOpen(false)}>{text.navSchedule}</a>
-        <a href="#team" onClick={() => setMenuOpen(false)}>{text.navTeam}</a>
-        <a href="#get-started" onClick={() => setMenuOpen(false)}>{text.gsEyebrow}</a>
+      <div id="noc-mobile-menu" className={`noc-mobile-menu${menuOpen ? " open" : ""}`}>
+        <a href="#how-it-works" onClick={(e) => { setMenuOpen(false); scrollToId(e, "how-it-works"); }}>{text.navHow}</a>
+        <a href="#schedule" onClick={(e) => { setMenuOpen(false); scrollToId(e, "schedule"); }}>{text.navSchedule}</a>
+        <a href="#team" onClick={(e) => { setMenuOpen(false); scrollToId(e, "team"); }}>{text.navTeam}</a>
         <button type="button" onClick={() => { setMenuOpen(false); login(); }}>{text.navSignIn}</button>
       </div>
 
       <main>
-        {/* Hero — static wordmark + headline focus (Fix 4a, 4d, 2a) */}
-        <section
-          style={{
-            width: "100%",
-            backgroundColor: "var(--bg)",
-            minHeight: "min(100vh, 900px)",
-            display: "grid",
-            placeItems: "center",
-            textAlign: "center",
-            position: "relative",
-            paddingTop: 88,
-            paddingBottom: 72,
-            backgroundImage:
-              "linear-gradient(to right, color-mix(in srgb, var(--ink) 3%, transparent) 1px, transparent 1px), linear-gradient(to bottom, color-mix(in srgb, var(--ink) 3%, transparent) 1px, transparent 1px)",
-            backgroundSize: "40px 40px",
-          }}
-        >
-          <div style={{ ...wrap, width: "100%" }}>
-          <div
-            style={{
-              position: "absolute",
-              right: "8%",
-              top: "18%",
-              width: 420,
-              height: 420,
-              borderRadius: "50%",
-              background: "color-mix(in srgb, var(--blue) 8%, transparent)",
-              filter: "blur(120px)",
-              pointerEvents: "none",
-            }}
-          />
-          <div>
-            <div
-              dir="ltr"
-              style={{
-                fontFamily: "Inter, system-ui, sans-serif",
-                fontSize: "clamp(18px, 4vw, 28px)",
-                fontWeight: 800,
-                letterSpacing: "-0.04em",
-                color: "var(--ink)",
-                marginBottom: 20,
-                lineHeight: 1,
-              }}
-            >
-              FLEETMARK
-            </div>
-            <HeroBusIllustration />
-            <div
-              className="mono"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 8,
-                border: "1px solid color-mix(in srgb, var(--green) 35%, transparent)",
-                borderRadius: 999,
-                padding: "6px 14px",
-                color: "var(--green)",
-                marginBottom: 20,
-                marginTop: 8,
-                fontSize: 12,
-                fontWeight: 700,
-              }}
-            >
-              <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--green)", boxShadow: "0 0 12px color-mix(in srgb, var(--green) 50%, transparent)" }} />
-              {text.heroBadge}
-            </div>
-            <h1 style={{ margin: 0, fontSize: "clamp(36px, 10vw, 80px)", lineHeight: 1.05, letterSpacing: "-0.05em", textShadow: "0 0 30px color-mix(in srgb, var(--blue) 30%, transparent)" }}>
-              <span style={{ color: "var(--hero-gradient-start)" }}>{text.heroA}</span>
-              <br />
-              <span
-                style={{
-                  background: "linear-gradient(to right, var(--hero-gradient-start), var(--blue))",
-                  WebkitBackgroundClip: "text",
-                  WebkitTextFillColor: "transparent",
-                  backgroundClip: "text",
-                }}
-              >
-                {text.heroB}
+        {/* ─────────── HERO ─────────── */}
+        <section className="noc-hero">
+          <div className="noc-hero__bg" aria-hidden="true">
+            <div className="noc-stars" />
+            <div className="noc-stars--2" />
+            <div className="noc-headlights" />
+            <div className="noc-headlights--warm" />
+            <div className="noc-hero__grid" />
+          </div>
+
+          <div className="noc-wrap noc-hero__inner">
+            {error ? (
+              <div role="alert" className="noc-alert noc-rise noc-rise-1">
+                <span className="material-symbols-outlined" aria-hidden="true">error</span>
+                <p>{error}</p>
+              </div>
+            ) : null}
+            <div className="noc-rise noc-rise-1">
+              <span className="noc-status">
+                <span className="noc-status__dot" />
+                {text.heroBadge}
               </span>
+            </div>
+
+            <h1 className="noc-h1 noc-rise noc-rise-2">
+              {text.heroA}
+              <br />
+              <span className="accent">{text.heroB}</span>
             </h1>
-            <p style={{ maxWidth: 560, margin: "24px auto 0", color: "var(--mid)", fontSize: 18, lineHeight: 1.65 }}>
-              {text.heroText}
-            </p>
-            <div style={{ marginTop: 28, display: "flex", gap: 16, justifyContent: "center", flexWrap: "wrap" }}>
-              <button type="button" onClick={login} style={{ border: "1px solid var(--blue-bdr)", background: "var(--blue-bg)", color: "var(--blue)", borderRadius: 8, padding: "14px 28px", fontWeight: 700, cursor: "pointer" }}>
+
+            <p className="noc-lede noc-rise noc-rise-3">{text.heroText}</p>
+
+            <div className="noc-cta-row noc-rise noc-rise-3">
+              <button type="button" className="noc-btn noc-btn--primary" onClick={login}>
                 {text.heroBtnPrimary}
+                <span className="material-symbols-outlined" aria-hidden="true" style={{ fontSize: 18 }}>arrow_forward</span>
               </button>
-              <button type="button" onClick={scrollToHow} style={{ border: "1px solid var(--line2)", background: "var(--surface2)", color: "var(--ink)", borderRadius: 8, padding: "14px 28px", fontWeight: 700, cursor: "pointer" }}>
+              <button type="button" className="noc-btn noc-btn--ghost" onClick={(e) => scrollToId(e, "how-it-works")}>
                 {text.heroBtnSecondary}
               </button>
             </div>
-            <div style={{ marginTop: 28, display: "flex", justifyContent: "center", width: "100%" }}>
-              <div
-                role="group"
-                aria-label="Fleetmark at a glance"
-                style={{
-                  display: "inline-flex",
-                  flexWrap: "wrap",
-                  justifyContent: "center",
-                  alignItems: "stretch",
-                  border: "1px solid var(--line2)",
-                  borderRadius: 999,
-                  background: "color-mix(in srgb, var(--surface) 92%, transparent)",
-                  padding: "6px 10px",
-                  maxWidth: "100%",
-                }}
-              >
-                {text.heroStats.map((stat, i) => (
-                  <div
-                    key={stat.label}
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: 4,
-                      padding: "12px clamp(14px, 3vw, 28px)",
-                      borderLeft: i > 0 ? "1px solid color-mix(in srgb, var(--line2) 80%, transparent)" : "none",
-                      minWidth: 72,
-                    }}
-                  >
-                    <span className="mono" style={{ fontSize: "clamp(18px, 2.5vw, 24px)", fontWeight: 700, color: "var(--ink)", letterSpacing: "-0.03em" }}>
-                      {stat.value}
-                    </span>
-                    <span className="mono" style={{ fontSize: 10, fontWeight: 700, color: "var(--dim)", textTransform: "uppercase", letterSpacing: "0.14em" }}>
-                      {stat.label}
-                    </span>
-                  </div>
-                ))}
+
+            {/* Departure board */}
+            <div className="noc-board noc-rise noc-rise-4" role="group" aria-label={text.boardTitle}>
+              <div className="noc-board__head">
+                <span className="noc-board__title ltr">{text.boardTitle}</span>
+                <span className="noc-board__live ltr">{text.boardBadge}</span>
               </div>
+              {text.board.map((row) => (
+                <div className="noc-board__row" key={row.time + row.route}>
+                  <span className="noc-board__time ltr">{row.time}</span>
+                  <span className="noc-board__route">
+                    <b>{row.route}</b>
+                    <span className="ltr">{row.path}</span>
+                  </span>
+                  <span className={`noc-chip noc-chip--${row.status} ltr`}>{row.tag}</span>
+                </div>
+              ))}
             </div>
-            {error ? <p style={{ color: "var(--red)", marginTop: 16 }}>{error}</p> : null}
-          </div>
+
+            <div className="noc-stats noc-rise noc-rise-5" role="group" aria-label={text.statsLabel}>
+              {text.heroStats.map((stat) => (
+                <div className="noc-stat" key={stat.label}>
+                  <b className="ltr">{stat.value}</b>
+                  <span>{stat.label}</span>
+                </div>
+              ))}
+            </div>
+
           </div>
         </section>
 
-        <RevealSection id="how-it-works" className="landing-two-col" style={{ width: "100%", padding: "96px 0", backgroundColor: "var(--bg)" }}>
-          <div style={{ ...wrap, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 64, alignItems: "start" }}>
-          <div>
-            <span className="mono" style={{ color: "var(--blue)", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.12em", fontWeight: 700, display: "block", marginBottom: 16 }}>
-              {text.howEyebrow}
-            </span>
-            <h2 style={{ fontSize: 42, margin: "0 0 48px", letterSpacing: "-0.02em" }}>{text.howTitle}</h2>
-            <div style={{ display: "grid", gap: 40 }}>
-              {text.howSteps.map((item, idx) => (
-                <div key={idx} style={{ display: "flex", gap: 24 }}>
-                  <strong className="mono" style={{ color: "var(--blue)", fontSize: 20, fontWeight: 700, flexShrink: 0, lineHeight: 1.4 }}>
-                    {String(idx + 1).padStart(2, "0")}
-                  </strong>
-                  <div>
-                    <h3 style={{ margin: "0 0 10px", fontSize: 18, fontWeight: 700 }}>{item.title}</h3>
-                    {item.lines.map((line, i) => (
-                      <p key={i} style={{ margin: i === 0 ? 0 : "6px 0 0", color: "var(--mid)", fontSize: 14, lineHeight: 1.6 }}>
-                        {line}
-                      </p>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div style={{ position: "relative" }}>
-            <div
-              style={{
-                position: "absolute",
-                inset: -4,
-                borderRadius: 14,
-                background: "linear-gradient(to right, color-mix(in srgb, var(--blue) 20%, transparent), transparent)",
-                filter: "blur(24px)",
-                opacity: 0.85,
-              }}
-            />
-            <div style={{ position: "relative", borderRadius: 12, border: "1px solid color-mix(in srgb, var(--ink) 7%, transparent)", background: "var(--surface)", overflow: "hidden", boxShadow: "0 25px 50px -12px rgba(0,0,0,0.5)" }}>
-              <div style={{ height: 32, background: "var(--surface2)", display: "flex", alignItems: "center", padding: "0 16px", gap: 6, borderBottom: "1px solid color-mix(in srgb, var(--ink) 5%, transparent)" }}>
-                <span style={{ width: 10, height: 10, borderRadius: "50%", background: "color-mix(in srgb, var(--red) 50%, transparent)" }} />
-                <span style={{ width: 10, height: 10, borderRadius: "50%", background: "color-mix(in srgb, var(--amber) 55%, transparent)" }} />
-                <span style={{ width: 10, height: 10, borderRadius: "50%", background: "color-mix(in srgb, var(--green) 50%, transparent)" }} />
-              </div>
-              <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}>
-                {/* Reservation mockup header */}
-                <div>
-                  <div style={{ fontSize: 17, fontWeight: 800 }}>Night Shuttle — Route A</div>
-                  <div className="mono" style={{ fontSize: 11, color: "var(--mid)", marginTop: 4 }}>OCP Saka → Nakhil → 1337</div>
-                </div>
-                {/* Stat boxes */}
-                <div style={{ display: "flex", gap: 10 }}>
-                  {[{ v: "32 seats", icon: "event_seat" }, { v: "11:00 PM", icon: "schedule" }, { v: "19 stops", icon: "pin_drop" }].map((s) => (
-                    <div key={s.v} style={{ flex: 1, background: "var(--surface2)", borderRadius: 8, padding: "12px 10px", textAlign: "center", border: "1px solid color-mix(in srgb, var(--line) 20%, transparent)" }}>
-                      <span className="material-symbols-outlined" style={{ fontSize: 16, color: "var(--blue)", display: "block", marginBottom: 4 }}>{s.icon}</span>
-                      <span className="mono" style={{ fontSize: 12, fontWeight: 700 }}>{s.v}</span>
-                    </div>
-                  ))}
-                </div>
-                {/* Reserve button */}
-                <button type="button" style={{ width: "100%", border: "none", borderRadius: 8, padding: "12px 16px", background: "var(--blue)", color: "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
-                  Reserve My Seat →
-                </button>
-                {/* Green confirmation row */}
-                <div style={{ display: "flex", alignItems: "center", gap: 10, background: "color-mix(in srgb, var(--green) 12%, transparent)", border: "1px solid color-mix(in srgb, var(--green) 30%, transparent)", borderRadius: 8, padding: "10px 14px" }}>
-                  <span className="material-symbols-outlined" style={{ color: "var(--green)", fontSize: 20, fontVariationSettings: "'FILL' 1" }}>check_circle</span>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: "var(--green)" }}>Seat confirmed! Route A · 11:00 PM</span>
-                </div>
-                {/* Footer tag */}
-                <div className="mono" style={{ fontSize: 11, color: "var(--blue)", background: "color-mix(in srgb, var(--blue) 10%, transparent)", padding: "8px 16px", borderRadius: 8, fontWeight: 700, textAlign: "center" }}>
-                  FLEETMARK · 1337
-                </div>
-              </div>
-            </div>
-          </div>
-          </div>
-        </RevealSection>
-
-        <RevealSection id="schedule" style={{ width: "100%", padding: "96px 0", backgroundColor: "var(--bg)", borderTop: "1px solid color-mix(in srgb, var(--ink) 5%, transparent)" }}>
-          <div style={wrap}>
-          <div style={{ marginBottom: 40 }}>
-            <span className="mono" style={{ color: "var(--blue)", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.12em", fontWeight: 700, display: "block", marginBottom: 16 }}>
-              {text.schedEyebrow}
-            </span>
-            <h2 style={{ fontSize: 42, margin: "0 0 16px", letterSpacing: "-0.02em" }}>{text.schedTitle}</h2>
-            <p style={{ margin: 0, color: "var(--mid)", fontSize: 15, lineHeight: 1.6, maxWidth: 560 }}>{text.schedDesc}</p>
-          </div>
-          <div className="landing-schedule-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 24 }}>
-            {text.schedBlocks.map((block) => (
-              <article
-                key={block.label}
-                style={{
-                  border: "1px solid color-mix(in srgb, var(--ink) 7%, transparent)",
-                  borderRadius: 12,
-                  overflow: "hidden",
-                  background: "var(--surface)",
-                  display: "flex",
-                  flexDirection: "column",
-                }}
-              >
-                <div style={{ height: 4, background: block.bar, width: "100%" }} />
-                <div style={{ padding: 24 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20, gap: 8 }}>
-                    <span className="mono" style={{ color: block.bar, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.12em", fontWeight: 700 }}>
-                      {block.label}
-                    </span>
-                    <span className="material-symbols-outlined" style={{ color: block.bar, fontSize: 20, fontVariationSettings: "'FILL' 1" }}>
-                      {block.icon}
-                    </span>
-                  </div>
-                  <div className="mono" style={{ fontSize: 22, fontWeight: 700, marginBottom: 12, color: "var(--hero-gradient-start)" }}>
-                    {block.time}
-                  </div>
-                  <h3 style={{ margin: "0 0 10px", fontSize: 17, fontWeight: 700, lineHeight: 1.3 }}>{block.cardTitle}</h3>
-                  <p style={{ margin: "0 0 16px", color: "var(--mid)", fontSize: 14, lineHeight: 1.55 }}>{block.desc}</p>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                    {block.tags.map((tag) => (
-                      <span
-                        key={tag}
-                        style={{
-                          fontSize: 11,
-                          padding: "6px 10px",
-                          borderRadius: 6,
-                          background: "var(--surface2)",
-                          border: "1px solid var(--line2)",
-                          color: "var(--ink2)",
-                        }}
-                      >
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              </article>
-            ))}
-          </div>
-          </div>
-        </RevealSection>
-
-        <RevealSection id="team" style={{ width: "100%", padding: "96px 0", backgroundColor: "var(--bg)" }}>
-          <div style={wrap}>
-          <span className="mono" style={{ color: "var(--blue)", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700, display: "block", marginBottom: 16 }}>
-            {text.teamEyebrow}
-          </span>
-          <h2 style={{ fontSize: 42, margin: "0 0 12px", letterSpacing: "-0.02em" }}>{text.teamTitle}</h2>
-          <p style={{ margin: "0 0 48px", color: "var(--mid)", fontSize: 16, maxWidth: 520 }}>{text.teamSubtitle}</p>
-          <div style={{ display: "flex", gap: 24, overflowX: "auto", paddingBottom: 48, scrollbarWidth: "thin" }}>
-            {text.teamMembers.map((member, idx) => {
-              const avatarGradients = [
-                "linear-gradient(135deg, #667eea, #764ba2)",
-                "linear-gradient(135deg, #11998e, #38ef7d)",
-                "linear-gradient(135deg, #f12711, #f5af19)",
-                "linear-gradient(135deg, #667eea, #764ba2)",
-                "linear-gradient(135deg, #0d9488, #10b981)",
-              ];
-              const initials = member.name.split(" ").map((w) => w[0]).join("").toUpperCase();
-              return (
-                <article
-                  key={member.name}
-                  style={{
-                    position: "relative",
-                    minWidth: 300,
-                    minHeight: 420,
-                    borderRadius: 12,
-                    overflow: "hidden",
-                    background: "var(--surface2)",
-                    border: "1px solid var(--line2)",
-                    flexShrink: 0,
-                    transition: "transform 0.2s ease, border-color 0.2s ease",
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.transform = "translateY(-4px)";
-                    e.currentTarget.style.borderColor = "color-mix(in srgb, var(--blue) 35%, transparent)";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.transform = "none";
-                    e.currentTarget.style.borderColor = "var(--line2)";
-                  }}
-                >
-                  <div
-                    style={{
-                      position: "absolute",
-                      inset: 0,
-                      background: "linear-gradient(180deg, color-mix(in srgb, var(--surface2) 30%, transparent) 0%, var(--bg) 100%)",
-                      opacity: 0.5,
-                    }}
-                  />
-                  <div
-                    style={{
-                      position: "absolute",
-                      inset: 0,
-                      background: "linear-gradient(to top, var(--bg) 0%, color-mix(in srgb, var(--bg) 50%, transparent) 50%, transparent 100%)",
-                      opacity: 0.85,
-                    }}
-                  />
-                  <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: "var(--green)" }} />
-                  {/* Avatar */}
-                  <div style={{ position: "relative", display: "flex", justifyContent: "center", paddingTop: 48 }}>
-                    <div
-                      style={{
-                        width: 64,
-                        height: 64,
-                        borderRadius: "50%",
-                        background: avatarGradients[idx % avatarGradients.length],
-                        display: "grid",
-                        placeItems: "center",
-                        fontSize: 22,
-                        fontWeight: 800,
-                        color: "#fff",
-                        letterSpacing: "-0.02em",
-                        boxShadow: "0 8px 24px rgba(0,0,0,0.3)",
-                      }}
-                    >
-                      {initials}
+        {/* ─────────── HOW IT WORKS ─────────── */}
+        <RevealSection id="how-it-works" className="noc-section noc-section--line">
+          <div className="noc-wrap noc-grid-2">
+            <div>
+              <span className="noc-eyebrow">{text.howEyebrow}</span>
+              <h2 className="noc-h2">{text.howTitle}</h2>
+              <div className="noc-steps">
+                {text.howSteps.map((item, idx) => (
+                  <div className="noc-step" key={idx}>
+                    <span className="noc-step__num ltr">{String(idx + 1).padStart(2, "0")}</span>
+                    <div>
+                      <h3>{item.title}</h3>
+                      {item.lines.map((line, i) => <p key={i}>{line}</p>)}
                     </div>
                   </div>
-                  <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: 24 }}>
-                    <h4 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 800 }}>{member.name}</h4>
-                    <p style={{ margin: "0 0 10px", color: "var(--blue)", fontSize: 13, fontWeight: 600 }}>{member.role}</p>
-                    <p className="mono" style={{ margin: "0 0 16px", color: "var(--mid)", fontSize: 11, lineHeight: 1.5 }}>
-                      {member.skills}
-                    </p>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 10, fontSize: 11, fontWeight: 700 }}>
-                      <a href="#" style={{ color: "var(--blue)", textDecoration: "underline", textUnderlineOffset: 3 }}>
-                        GitHub
-                      </a>
-                      <span style={{ color: "var(--dim)" }}>·</span>
-                      <a href="#" style={{ color: "var(--blue)", textDecoration: "underline", textUnderlineOffset: 3 }}>
-                        LinkedIn
-                      </a>
-                      <span style={{ color: "var(--dim)" }}>·</span>
-                      <a href={`mailto:${member.name.split(" ")[0].toLowerCase()}@student.1337.ma`} style={{ color: "var(--blue)", textDecoration: "underline", textUnderlineOffset: 3 }}>
-                        Email
-                      </a>
-                    </div>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-          </div>
-        </RevealSection>
-
-        <RevealSection id="get-started" className="landing-two-col" style={{ width: "100%", padding: "96px 0", backgroundColor: "var(--bg)" }}>
-          <div style={{ ...wrap, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 64, alignItems: "start" }}>
-          <div>
-            <span className="mono" style={{ color: "var(--blue)", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.12em", fontWeight: 700, display: "block", marginBottom: 16 }}>
-              {text.gsEyebrow}
-            </span>
-            <h2 style={{ fontSize: 42, margin: "0 0 28px", letterSpacing: "-0.02em" }}>{text.gsTitle}</h2>
-            <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "grid", gap: 20 }}>
-              {text.gsSteps.map((item, idx) => (
-                <li key={idx} style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-                  <span className="mono" style={{ minWidth: 24, height: 24, borderRadius: "50%", border: "1px solid var(--blue-bdr)", color: "var(--blue)", display: "grid", placeItems: "center", fontSize: 10, flexShrink: 0 }}>
-                    {idx + 1}
-                  </span>
-                  <span style={{ color: "var(--mid)", fontSize: 15, lineHeight: 1.55 }}>{item}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-          <div
-            style={{
-              borderRadius: 16,
-              padding: 2,
-              background: "linear-gradient(135deg, color-mix(in srgb, var(--blue) 55%, transparent), color-mix(in srgb, var(--orbit, #7e22ce) 45%, transparent))",
-              boxShadow: "0 0 40px color-mix(in srgb, var(--blue) 18%, transparent)",
-            }}
-          >
-            <div
-              style={{
-                background: "var(--surface-2, var(--surface2))",
-                color: "var(--ink)",
-                borderRadius: 14,
-                padding: 34,
-                border: "1px solid color-mix(in srgb, var(--line) 40%, transparent)",
-              }}
-            >
-              <div
-                style={{
-                  width: 48,
-                  height: 48,
-                  background: "color-mix(in srgb, var(--blue) 15%, transparent)",
-                  color: "var(--blue)",
-                  borderRadius: 8,
-                  display: "grid",
-                  placeItems: "center",
-                  fontWeight: 800,
-                  fontSize: 22,
-                  marginBottom: 20,
-                  border: "1px solid color-mix(in srgb, var(--blue) 25%, transparent)",
-                }}
-              >
-                42
-              </div>
-              <h3 style={{ margin: 0, fontSize: 22, fontWeight: 800, color: "var(--text-primary)" }}>{text.gsCardTitle}</h3>
-              <p style={{ color: "var(--mid)", marginTop: 10, fontSize: 14, lineHeight: 1.55 }}>
-                {text.gsCardSub}
-              </p>
-              <button
-                type="button"
-                onClick={login}
-                style={{
-                  marginTop: 20,
-                  width: "100%",
-                  border: "1px solid color-mix(in srgb, var(--blue) 35%, transparent)",
-                  borderRadius: 8,
-                  padding: "14px 16px",
-                  background: "color-mix(in srgb, var(--blue) 12%, transparent)",
-                  color: "var(--blue)",
-                  fontWeight: 700,
-                  cursor: "pointer",
-                }}
-              >
-                {text.gsBtn}
-              </button>
-              <p className="mono" style={{ margin: "12px 0 0", fontSize: 11, color: "var(--dim)", textAlign: "center" }}>
-                {text.gsSecured}
-              </p>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 20 }}>
-                {text.gsChips.map((chip) => (
-                  <span
-                    key={chip}
-                    style={{
-                      fontSize: 11,
-                      fontWeight: 600,
-                      padding: "6px 12px",
-                      borderRadius: 999,
-                      background: "var(--surface-3, var(--surface3))",
-                      border: "1px solid var(--line2)",
-                      color: "var(--ink2)",
-                    }}
-                  >
-                    {chip}
-                  </span>
                 ))}
               </div>
-              <p className="mono" style={{ margin: "24px 0 0", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--dim)", textAlign: "center" }}>
-                {text.gsFootTag}
-              </p>
+            </div>
+
+            <div className="noc-pass" aria-hidden="true">
+              <div className="noc-pass__head">
+                <div className="noc-pass__brand ltr">{text.pass.brand}</div>
+                <div className="noc-pass__route">{text.pass.route}</div>
+                <div className="noc-pass__path ltr">1337 → OCP Saka → Nakhil → …</div>
+              </div>
+              <div className="noc-pass__grid">
+                {["event_seat", "schedule", "pin_drop"].map((icon, i) => (
+                  <div className="noc-pass__cell" key={icon}>
+                    <span className="material-symbols-outlined">{icon}</span>
+                    <b className="ltr">{text.pass.cells[i]}</b>
+                  </div>
+                ))}
+              </div>
+              <div style={{ padding: "0 24px" }}><div className="noc-pass__tear" /></div>
+              <div className="noc-pass__foot">
+                <div className="noc-pass__confirm">
+                  <span className="material-symbols-outlined">check_circle</span>
+                  <span>{text.pass.confirm}</span>
+                </div>
+              </div>
             </div>
           </div>
+        </RevealSection>
+
+        {/* ─────────── SCHEDULE ─────────── */}
+        <RevealSection id="schedule" className="noc-section noc-section--line">
+          <div className="noc-wrap">
+            <span className="noc-eyebrow">{text.schedEyebrow}</span>
+            <h2 className="noc-h2">{text.schedTitle}</h2>
+            <p className="noc-sub">{text.schedDesc}</p>
+
+            <div className="noc-timeline">
+              <div className="noc-timeline__track" aria-hidden="true">
+                {/* 21–23 peak · 23–01 unified · 01–02 peak · 02–03 no bus · 03–06 hourly */}
+                <div className="noc-timeline__seg" style={{ flex: 2, background: "var(--aurora)" }} />
+                <div className="noc-timeline__seg" style={{ flex: 2, background: "var(--sodium)" }} />
+                <div className="noc-timeline__seg" style={{ flex: 1, background: "var(--aurora)" }} />
+                <div className="noc-timeline__seg" style={{ flex: 1, background: "var(--n-surface-3)" }} />
+                <div className="noc-timeline__seg" style={{ flex: 3, background: "var(--n-mid)" }} />
+              </div>
+              <div className="noc-timeline__labels ltr">
+                <span>21:00</span><span>00:00</span><span>03:00</span><span>06:00</span>
+              </div>
+            </div>
+
+            <div className="noc-sched-grid">
+              {text.schedBlocks.map((block) => (
+                <article className="noc-sched-card" key={block.label}>
+                  <div className="noc-sched-card__head">
+                    <span className="noc-sched-card__label" style={{ color: toneColor[block.tone] }}>{block.label}</span>
+                    <span className="material-symbols-outlined" style={{ color: toneColor[block.tone], fontSize: 20, fontVariationSettings: "'FILL' 1" }}>{block.icon}</span>
+                  </div>
+                  <div className="noc-sched-card__time ltr" style={{ color: toneColor[block.tone] }}>{block.time}</div>
+                  <h3>{block.cardTitle}</h3>
+                  <p>{block.desc}</p>
+                  <div className="noc-tags">
+                    {block.tags.map((tag) => <span className="noc-tag ltr" key={tag}>{tag}</span>)}
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+        </RevealSection>
+
+        {/* ─────────── TEAM ─────────── */}
+        <RevealSection id="team" className="noc-section noc-section--line">
+          <div className="noc-wrap">
+            <span className="noc-eyebrow">{text.teamEyebrow}</span>
+            <h2 className="noc-h2">{text.teamTitle}</h2>
+            <p className="noc-sub">{text.teamSubtitle}</p>
+            <div className="noc-team-scroll">
+              {text.teamMembers.map((member, idx) => {
+                const initials = member.name.split(" ").map((w) => w[0]).join("").toUpperCase();
+                return (
+                  <article className={`noc-teamcard${idx % 2 ? " noc-teamcard--sodium" : ""}`} key={member.name}>
+                    <div className="noc-avatar ltr">{initials}</div>
+                    <h4>{member.name}</h4>
+                    <p className="noc-teamcard__role">{member.role}</p>
+                    <p className="noc-teamcard__skills ltr">
+                      {/* each skill stays whole, so a line never starts with a stray "·" */}
+                      {member.skills.split(" · ").map((skill, i, all) => (
+                        <React.Fragment key={skill}>
+                          {i > 0 && " "}
+                          <span>{skill}{i < all.length - 1 ? " ·" : ""}</span>
+                        </React.Fragment>
+                      ))}
+                    </p>
+                  </article>
+                );
+              })}
+            </div>
+          </div>
+        </RevealSection>
+
+        {/* ─────────── GET STARTED ─────────── */}
+        <RevealSection id="get-started" className="noc-section noc-section--line">
+          <div className="noc-wrap noc-grid-2">
+            <div>
+              <span className="noc-eyebrow">{text.gsEyebrow}</span>
+              <h2 className="noc-h2">{text.gsTitle}</h2>
+              <ul className="noc-list">
+                {text.gsSteps.map((item, idx) => (
+                  <li key={idx}>
+                    <span className="noc-list__num ltr">{idx + 1}</span>
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="noc-access">
+              <div className="noc-access__inner">
+                <div className="noc-access__badge ltr">42</div>
+                <h3>{text.gsCardTitle}</h3>
+                <p>{text.gsCardSub}</p>
+                <button type="button" className="noc-btn noc-btn--primary noc-btn--block" style={{ marginTop: 20 }} onClick={login}>
+                  {text.gsBtn}
+                  <span className="material-symbols-outlined" aria-hidden="true" style={{ fontSize: 18 }}>arrow_forward</span>
+                </button>
+                <p className="noc-access__secured">{text.gsSecured}</p>
+                <div className="noc-chips">
+                  {text.gsChips.map((chip) => <span key={chip}>{chip}</span>)}
+                </div>
+                <p className="noc-access__foot ltr">{text.gsFootTag}</p>
+              </div>
+            </div>
           </div>
         </RevealSection>
       </main>
 
-      {/* FIX 6 — Footer */}
-      <footer
-        style={{
-          width: "100%",
-          backgroundColor: "var(--bg)",
-          borderTop: "1px solid color-mix(in srgb, var(--ink) 5%, transparent)",
-        }}
-      >
-        <div style={{ ...wrap, padding: "48px 32px", display: "flex", flexDirection: "column", gap: 16 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 24, flexWrap: "wrap" }}>
-          <div>
-            <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: "-0.03em" }} dir="ltr">Fleetmark</div>
-            <p className="mono" style={{ margin: "8px 0 0", color: "var(--mid)", fontSize: 11, letterSpacing: "0.06em" }}>
-              {text.footerSub}
-            </p>
+      {/* ─────────── FOOTER ─────────── */}
+      <footer className="noc-footer">
+        <div className="noc-wrap noc-footer__inner">
+          <div className="noc-footer__top">
+            <div>
+              <div className="noc-footer__brand ltr">Fleetmark</div>
+              <p className="noc-footer__meta" style={{ marginTop: 8 }}>{text.footerSub}</p>
+            </div>
+            <div className="noc-footer__meta">{text.footerCopy}</div>
           </div>
-          <div className="mono" style={{ color: "var(--dim)", fontSize: 11, letterSpacing: "0.06em" }}>
-            {text.footerCopy}
+          <div className="noc-footer__links">
+            <p className="noc-footer__meta ltr" style={{ margin: 0 }}>{text.footerTech}</p>
+            <div className="noc-footer__legal">
+              <Link to="/privacy">{text.privacy}</Link>
+              <Link to="/terms">{text.terms}</Link>
+            </div>
           </div>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          <p className="mono" style={{ margin: 0, color: "var(--dim)", fontSize: 11, letterSpacing: "0.04em" }}>
-            {text.footerTech}
-          </p>
-          <span style={{ color: "var(--dim)", fontSize: 11 }}>·</span>
-          <a href="/privacy" style={{ fontSize: 11, color: "var(--dim)", fontWeight: 600, textDecoration: "none" }}>Privacy Policy</a>
-          <span style={{ color: "var(--dim)", fontSize: 11 }}>·</span>
-          <a href="/terms" style={{ fontSize: 11, color: "var(--dim)", fontWeight: 600, textDecoration: "none" }}>Terms of Service</a>
-        </div>
         </div>
       </footer>
     </div>

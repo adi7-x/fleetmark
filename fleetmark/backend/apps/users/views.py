@@ -1,13 +1,18 @@
 import logging
 import os
+import secrets
 from urllib.parse import urlencode
 
 import requests
+from django.conf import settings
 from django.shortcuts import redirect as django_redirect
+from django.utils import timezone
 from rest_framework import generics, status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
+from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 
 logger = logging.getLogger(__name__)
@@ -20,6 +25,7 @@ from apps.users.serializers import (
     UserSerializer,
 )
 from apps.users.permissions import IsLogisticsStaff
+from apps.users.tokens import PreAuth2FAToken
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 42 OAuth settings (read from environment)
@@ -37,6 +43,45 @@ INTRA_42_USER_URL = 'https://api.intra.42.fr/v2/me'
 ADMIN_42_LOGIN = os.environ.get('ADMIN_42_LOGIN', '')
 FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:5173')
 
+# CSRF protection for the OAuth flow: a random `state` is issued at /42/login/,
+# stored in this HttpOnly cookie, and echoed back by 42 at /42/callback/.
+# The callback rejects any request whose state does not match the cookie.
+OAUTH_STATE_COOKIE = 'fleetmark_oauth_state'
+OAUTH_STATE_MAX_AGE = 600  # seconds (10 minutes to complete the 42 login)
+
+# The refresh token never reaches JS: it lives only in this HttpOnly cookie,
+# scoped to the auth path so it's sent only to the endpoints that need it
+# (token refresh, 2FA login-verify, logout). Access tokens are short-lived
+# and handed to the SPA to hold in memory; the refresh token is the
+# long-lived credential (7 days) an XSS payload would actually want, so
+# that's the one kept out of reach of any JS running on the page.
+REFRESH_COOKIE = 'fleetmark_refresh'
+REFRESH_COOKIE_PATH = '/api/v1/auth/'
+
+
+def _set_refresh_cookie(response, refresh_token_str):
+    max_age = int(settings.SIMPLE_JWT['REFRESH_TOKEN_LIFETIME'].total_seconds())
+    response.set_cookie(
+        REFRESH_COOKIE,
+        refresh_token_str,
+        max_age=max_age,
+        httponly=True,
+        secure=True,
+        samesite='Lax',
+        path=REFRESH_COOKIE_PATH,
+    )
+
+
+def _oauth_error(request, message, code, http_status, **extra):
+    """A browser that fails mid-OAuth is sent back to the landing page with a
+    short error code it can explain; API clients (and tests) still get JSON."""
+    if 'text/html' in request.META.get('HTTP_ACCEPT', ''):
+        resp = django_redirect(f'{FRONTEND_URL}/?auth_error={code}')
+    else:
+        resp = Response({'error': message, **extra}, status=http_status)
+    resp.delete_cookie(OAUTH_STATE_COOKIE)
+    return resp
+
 
 class OAuth42LoginView(APIView):
     """
@@ -48,17 +93,30 @@ class OAuth42LoginView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request):
+        state = secrets.token_urlsafe(32)
         params = {
             'client_id': INTRA_42_CLIENT_ID,
             'redirect_uri': INTRA_42_REDIRECT_URI,
             'response_type': 'code',
             'scope': 'public',
+            'state': state,
         }
         authorization_url = f'{INTRA_42_AUTHORIZE_URL}?{urlencode(params)}'
-        return Response(
+        response = Response(
             {'authorization_url': authorization_url},
             status=status.HTTP_200_OK,
         )
+        # Bind the state to the browser via an HttpOnly cookie. SameSite=Lax so
+        # it is still sent on the top-level callback navigation coming from 42.
+        response.set_cookie(
+            OAUTH_STATE_COOKIE,
+            state,
+            max_age=OAUTH_STATE_MAX_AGE,
+            httponly=True,
+            secure=True,
+            samesite='Lax',
+        )
+        return response
 
 
 class OAuth42CallbackView(APIView):
@@ -76,10 +134,20 @@ class OAuth42CallbackView(APIView):
     def get(self, request):
         code = request.query_params.get('code')
         if not code:
-            return Response(
-                {'error': 'Missing authorization code.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            # 42 sends ?error=access_denied when the user cancels consent.
+            return _oauth_error(request, 'Missing authorization code.', 'denied', status.HTTP_400_BAD_REQUEST)
+
+        # ── Step 0: CSRF protection — validate the OAuth state ────────────
+        # The state returned by 42 must match the one we issued at /42/login/
+        # (stored in the HttpOnly cookie). A missing/forged state is rejected.
+        returned_state = request.query_params.get('state')
+        expected_state = request.COOKIES.get(OAUTH_STATE_COOKIE)
+        if (
+            not returned_state
+            or not expected_state
+            or not secrets.compare_digest(returned_state, expected_state)
+        ):
+            return _oauth_error(request, 'Invalid or missing OAuth state.', 'expired', status.HTTP_400_BAD_REQUEST)
 
         # ── Step 1: Exchange code for 42 access token ────────────────────
         token_data = {
@@ -97,10 +165,9 @@ class OAuth42CallbackView(APIView):
                 token_response.text,
                 INTRA_42_REDIRECT_URI,
             )
-            return Response(
-                {'error': 'Failed to obtain access token from 42.',
-                 'detail': token_response.text},
-                status=status.HTTP_502_BAD_GATEWAY,
+            return _oauth_error(
+                request, 'Failed to obtain access token from 42.', 'provider',
+                status.HTTP_502_BAD_GATEWAY, detail=token_response.text,
             )
         access_token_42 = token_response.json().get('access_token')
 
@@ -108,19 +175,17 @@ class OAuth42CallbackView(APIView):
         headers = {'Authorization': f'Bearer {access_token_42}'}
         profile_response = requests.get(INTRA_42_USER_URL, headers=headers, timeout=10)
         if profile_response.status_code != 200:
-            return Response(
-                {'error': 'Failed to fetch user profile from 42.'},
-                status=status.HTTP_502_BAD_GATEWAY,
-            )
+            return _oauth_error(request, 'Failed to fetch user profile from 42.', 'provider', status.HTTP_502_BAD_GATEWAY)
         profile = profile_response.json()
         login_42 = profile.get('login')
         email = profile.get('email')
 
         if not login_42 or not email:
-            return Response(
-                {'error': 'Incomplete profile data from 42.'},
-                status=status.HTTP_502_BAD_GATEWAY,
-            )
+            return _oauth_error(request, 'Incomplete profile data from 42.', 'provider', status.HTTP_502_BAD_GATEWAY)
+
+        # 42 profile image: prefer the full link, fall back to the small version.
+        image = profile.get('image') or {}
+        avatar_url = image.get('link') or (image.get('versions') or {}).get('small')
 
         # ── Step 3: Get or create local user ─────────────────────────────
         role = 'LOGISTICS_STAFF' if login_42 == ADMIN_42_LOGIN else 'STUDENT'
@@ -130,6 +195,7 @@ class OAuth42CallbackView(APIView):
             defaults={
                 'email': email,
                 'role': role,
+                'avatar_url': avatar_url,
             },
         )
 
@@ -138,43 +204,77 @@ class OAuth42CallbackView(APIView):
             user.email = email
             user.save(update_fields=['email'])
 
+        # Refresh the avatar on every login if it changed on the 42 side
+        if not created and avatar_url and user.avatar_url != avatar_url:
+            user.avatar_url = avatar_url
+            user.save(update_fields=['avatar_url'])
+
+        if not user.is_active:
+            return _oauth_error(request, 'This account has been deactivated.', 'blocked', status.HTTP_403_FORBIDDEN)
+
         # Promote to staff if login matches admin login and role was wrong
         if login_42 == ADMIN_42_LOGIN and user.role != 'LOGISTICS_STAFF':
             user.role = 'LOGISTICS_STAFF'
             user.is_staff = True
             user.save(update_fields=['role', 'is_staff'])
 
-        # ── Step 4: Issue JWT tokens ─────────────────────────────────────
-        refresh = RefreshToken.for_user(user)
+        # ── Step 4: Issue tokens — or, if 2FA is on, don't ────────────────
+        # A user with TOTP enabled does NOT get a session here. They get a
+        # short-lived pre-auth token that proves "just completed 42 OAuth as
+        # this user" but authenticates nowhere (see PreAuth2FAToken). The
+        # real access/refresh pair is only minted by TOTPLoginVerifyView,
+        # after a valid TOTP code. This is what makes 2FA mandatory instead
+        # of a frontend-only prompt the user could simply skip.
         user_data = UserSerializer(user).data
-
-        access_tok = str(refresh.access_token)
-        refresh_tok = str(refresh)
-
-        # Include 2FA status so the frontend can prompt for TOTP if needed
         totp_required = bool(user.totp_enabled)
-
-        # If the request came from the frontend JS (fetch), return JSON.
-        # If the browser hit this endpoint directly (42 redirected here),
-        # redirect to the frontend with tokens in the URL fragment.
         accept = request.META.get('HTTP_ACCEPT', '')
-        if 'application/json' in accept:
-            return Response({
-                'access': access_tok,
-                'refresh': refresh_tok,
-                'user': user_data,
-                'totp_required': totp_required,
-            }, status=status.HTTP_200_OK)
 
-        frontend_callback = (
-            f'{FRONTEND_URL}/auth/callback'
-            f'#access={access_tok}'
-            f'&refresh={refresh_tok}'
-            f'&role={user_data.get("role", "")}'
-            f'&login={user_data.get("login_42", "")}'
-            f'&totp={int(totp_required)}'
-        )
-        return django_redirect(frontend_callback)
+        if totp_required:
+            preauth_tok = str(PreAuth2FAToken.for_user(user))
+
+            if 'application/json' in accept:
+                resp = Response({
+                    'preauth': preauth_tok,
+                    'user': user_data,
+                    'totp_required': True,
+                }, status=status.HTTP_200_OK)
+                resp.delete_cookie(OAUTH_STATE_COOKIE)
+                return resp
+
+            frontend_callback = (
+                f'{FRONTEND_URL}/auth/callback'
+                f'#preauth={preauth_tok}'
+                f'&totp=1'
+            )
+            resp = django_redirect(frontend_callback)
+            resp.delete_cookie(OAUTH_STATE_COOKIE)
+            return resp
+
+        # No 2FA — issue the real pair now. The refresh token goes in the
+        # HttpOnly cookie only; the access token is the only credential
+        # handed to JS, and only via this one-time redirect fragment.
+        refresh = RefreshToken.for_user(user)
+        access_tok = str(refresh.access_token)
+
+        if 'application/json' in accept:
+            resp = Response({
+                'access': access_tok,
+                'user': user_data,
+                'totp_required': False,
+            }, status=status.HTTP_200_OK)
+        else:
+            frontend_callback = (
+                f'{FRONTEND_URL}/auth/callback'
+                f'#access={access_tok}'
+                f'&role={user_data.get("role", "")}'
+                f'&login={user_data.get("login_42", "")}'
+                f'&totp=0'
+            )
+            resp = django_redirect(frontend_callback)
+
+        resp.delete_cookie(OAUTH_STATE_COOKIE)
+        _set_refresh_cookie(resp, str(refresh))
+        return resp
 
 
 class ProfileView(APIView):
@@ -218,6 +318,9 @@ class UserDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = User.objects.all()
     serializer_class = UserAdminSerializer
     permission_classes = [IsLogisticsStaff]
+    # No DELETE/PUT: staff manage access by role and block/unblock; account
+    # deletion is the user's own GDPR action (/me/delete/).
+    http_method_names = ['get', 'patch', 'head', 'options']
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -271,7 +374,7 @@ class GDPRDataExportView(APIView):
                 }
                 for r in reports
             ],
-            'exported_at': __import__('django.utils.timezone', fromlist=['now']).now().isoformat(),
+            'exported_at': timezone.now().isoformat(),
         }
 
         response = Response(data, status=status.HTTP_200_OK)
@@ -342,9 +445,17 @@ class TOTPSetupView(APIView):
             issuer_name='Fleetmark SSBS',
         )
 
+        # SVG needs no Pillow; sent as a data URI the SPA can drop into <img>.
+        import base64
+        import qrcode
+        import qrcode.image.svg
+        svg = qrcode.make(provisioning_uri, image_factory=qrcode.image.svg.SvgPathImage).to_string()
+        qr_code = 'data:image/svg+xml;base64,' + base64.b64encode(svg).decode()
+
         return Response({
             'secret': secret,
             'provisioning_uri': provisioning_uri,
+            'qr_code': qr_code,
         }, status=status.HTTP_200_OK)
 
 
@@ -419,3 +530,128 @@ class TOTPDisableView(APIView):
         logger.info('2FA disabled for user %s', user.id)
 
         return Response({'detail': '2FA has been disabled.'}, status=status.HTTP_200_OK)
+
+
+class TOTPLoginVerifyView(APIView):
+    """
+    POST /api/v1/auth/2fa/login-verify/
+    Body: { "preauth": "<token from the OAuth callback>", "code": "123456" }
+
+    Completes login for a user whose account has 2FA enabled. The OAuth
+    callback issued only a pre-auth token (no session, no access, no
+    refresh) — this exchanges that token plus a valid TOTP code for the
+    real access/refresh pair. This is the only path that can turn a
+    pre-auth token into a session, and it requires a correct code.
+    """
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        import pyotp
+
+        preauth_str = request.data.get('preauth', '')
+        code = request.data.get('code', '')
+
+        if not preauth_str or not code:
+            return Response(
+                {'detail': 'preauth and code are both required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            preauth = PreAuth2FAToken(preauth_str)
+        except TokenError:
+            return Response(
+                {'detail': 'Invalid or expired login attempt. Please log in again.'},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        try:
+            user = User.objects.get(pk=preauth['user_id'])
+        except (User.DoesNotExist, KeyError):
+            return Response(
+                {'detail': 'Invalid or expired login attempt. Please log in again.'},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        if not user.totp_enabled or not user.totp_secret:
+            # 2FA was disabled between the OAuth callback and this request.
+            return Response(
+                {'detail': '2FA is not enabled for this account.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        totp = pyotp.TOTP(user.totp_secret)
+        if not totp.verify(code, valid_window=1):
+            return Response({'detail': 'Invalid code.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        refresh = RefreshToken.for_user(user)
+        access_tok = str(refresh.access_token)
+        user_data = UserSerializer(user).data
+
+        resp = Response({
+            'access': access_tok,
+            'user': user_data,
+        }, status=status.HTTP_200_OK)
+        _set_refresh_cookie(resp, str(refresh))
+        return resp
+
+
+class CookieTokenRefreshView(APIView):
+    """
+    POST /api/v1/auth/token/refresh/
+
+    Reads the refresh token from the HttpOnly cookie — never from the
+    request body, since the SPA never has it in the first place. Returns a
+    fresh access token. This replaces SimpleJWT's stock TokenRefreshView,
+    which expected the refresh token in the POST body.
+    """
+    permission_classes = [AllowAny]
+    # The SPA calls this on every full page load and the request is
+    # anonymous by construction (the credential is the HttpOnly cookie, not
+    # an Authorization header), so it must not share the generic anon
+    # browsing budget — see DEFAULT_THROTTLE_RATES['token_refresh'].
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'token_refresh'
+
+    def post(self, request):
+        raw = request.COOKIES.get(REFRESH_COOKIE)
+        if not raw:
+            return Response(
+                {'detail': 'No refresh token cookie.'},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        try:
+            refresh = RefreshToken(raw)
+            user_id = refresh.get(settings.SIMPLE_JWT.get('USER_ID_CLAIM', 'user_id'))
+            # A user blocked in Users & Roles must lose the session, not keep
+            # minting access tokens that every API call then rejects.
+            if not User.objects.filter(pk=user_id, is_active=True).exists():
+                raise TokenError('inactive user')
+        except TokenError:
+            resp = Response(
+                {'detail': 'Refresh token invalid or expired.'},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+            resp.delete_cookie(REFRESH_COOKIE, path=REFRESH_COOKIE_PATH)
+            return resp
+
+        return Response({'access': str(refresh.access_token)}, status=status.HTTP_200_OK)
+
+
+class LogoutView(APIView):
+    """
+    POST /api/v1/auth/logout/
+
+    Clears the refresh-token cookie server-side. JS cannot delete an
+    HttpOnly cookie itself, so logout has to be a real request, not just a
+    client-side localStorage clear. The access token the SPA is holding in
+    memory is simply dropped by the caller; it expires on its own shortly
+    after (ACCESS_TOKEN_LIFETIME).
+    """
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        resp = Response({'detail': 'Logged out.'}, status=status.HTTP_200_OK)
+        resp.delete_cookie(REFRESH_COOKIE, path=REFRESH_COOKIE_PATH)
+        return resp

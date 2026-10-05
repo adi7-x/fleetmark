@@ -2,7 +2,9 @@ from rest_framework import serializers
 from apps.reports.models import IncidentReport
 
 class ReportSerializer(serializers.ModelSerializer):
-	reporter_name = serializers.CharField(source='reporter.username', read_only=True)
+	# The custom User model has no `username` field (USERNAME_FIELD is email);
+	# use login_42, which is what identifies a 42 student everywhere else.
+	reporter_name = serializers.CharField(source='reporter.login_42', read_only=True)
 	trip_details = serializers.SerializerMethodField()
 
 	class Meta:

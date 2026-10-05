@@ -17,7 +17,8 @@ class IncidentReportViewSet(viewsets.ModelViewSet):
 		return IncidentReport.objects.filter(reporter=user)
 
 	def perform_create(self, serializer):
-		serializer.save(reporter=self.request.user)
+		# Students file reports; only staff move them out of "pending".
+		serializer.save(reporter=self.request.user, status='pending')
 
 	def _check_staff(self, request):
 		if getattr(request.user, 'role', None) != STAFF_ROLE:

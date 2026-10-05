@@ -1,4 +1,5 @@
 import React from "react";
+import { useTranslation } from "../../context/TranslationContext";
 
 /**
  * Fix 5b + 6a — Custom empty state illustrations for admin pages.
@@ -140,54 +141,55 @@ function ReportIllustration() {
   );
 }
 
+// titleKey / subtitleKey / ctaKey are translation keys, resolved with t() at render.
 const VARIANTS = {
   trips: {
     illustration: TripIllustration,
-    title: "No trips scheduled yet",
-    subtitle: "Create your first trip to start managing shuttle departures.",
-    ctaLabel: "New Trip",
+    titleKey: "emptyTripsTitle",
+    subtitleKey: "emptyTripsSub",
+    ctaKey: "navNewTrip",
     ctaIcon: "add_box",
   },
   buses: {
     illustration: BusIllustration,
-    title: "No buses registered",
-    subtitle: "Add a bus to your fleet to start assigning them to trips.",
-    ctaLabel: "Add Bus",
+    titleKey: "emptyBusesTitle",
+    subtitleKey: "emptyBusesSub",
+    ctaKey: "emptyAddBus",
     ctaIcon: "directions_bus",
   },
   routes: {
     illustration: RouteIllustration,
-    title: "No routes created",
-    subtitle: "Define a route with stops to create trip schedules.",
-    ctaLabel: "Create Route",
+    titleKey: "emptyRoutesTitle",
+    subtitleKey: "emptyRoutesSub",
+    ctaKey: "emptyCreateRoute",
     ctaIcon: "route",
   },
   stations: {
     illustration: StationIllustration,
-    title: "No stations registered",
-    subtitle: "Add a station to define stops on your shuttle routes.",
-    ctaLabel: "New Station",
+    titleKey: "emptyStationsTitle",
+    subtitleKey: "emptyStationsSub",
+    ctaKey: "stationsNew",
     ctaIcon: "add_location",
   },
   drivers: {
     illustration: DriverIllustration,
-    title: "No drivers registered",
-    subtitle: "Add a driver to assign them to trips and manage schedules.",
-    ctaLabel: "New Driver",
+    titleKey: "emptyDriversTitle",
+    subtitleKey: "emptyDriversSub",
+    ctaKey: "driversNew",
     ctaIcon: "person_add",
   },
   announcements: {
     illustration: AnnouncementIllustration,
-    title: "No announcements yet",
-    subtitle: "Use the form above to publish your first announcement.",
-    ctaLabel: null,
+    titleKey: "emptyAnnTitle",
+    subtitleKey: "emptyAnnSub",
+    ctaKey: null,
     ctaIcon: null,
   },
   reports: {
     illustration: ReportIllustration,
-    title: "No reports submitted",
-    subtitle: "Incident reports from passengers will appear here.",
-    ctaLabel: null,
+    titleKey: "emptyReportsTitle",
+    subtitleKey: "emptyReportsSub",
+    ctaKey: null,
     ctaIcon: null,
   },
 };
@@ -198,6 +200,7 @@ const VARIANTS = {
  * @param {function} onAction - callback when CTA is clicked
  */
 export default function AdminEmptyState({ variant = "trips", onAction }) {
+  const { t } = useTranslation();
   const v = VARIANTS[variant] || VARIANTS.trips;
   const Illustration = v.illustration;
 
@@ -218,10 +221,10 @@ export default function AdminEmptyState({ variant = "trips", onAction }) {
     >
       <Illustration />
       <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "var(--text-primary)" }}>
-        {v.title}
+        {t(v.titleKey)}
       </h3>
       <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)", maxWidth: 340 }}>
-        {v.subtitle}
+        {t(v.subtitleKey)}
       </p>
       {onAction && (
         <button
@@ -249,7 +252,7 @@ export default function AdminEmptyState({ variant = "trips", onAction }) {
           >
             {v.ctaIcon}
           </span>
-          {v.ctaLabel}
+          {v.ctaKey ? t(v.ctaKey) : null}
         </button>
       )}
     </div>

@@ -1,4 +1,4 @@
-from django.utils.timezone import localtime
+from django.utils.timezone import localtime, now
 from rest_framework import serializers
 
 from apps.trips.models import Trip
@@ -8,6 +8,8 @@ class TripSerializer(serializers.ModelSerializer):
 	seats_left = serializers.IntegerField(read_only=True)
 	route_name = serializers.CharField(source='route.name', read_only=True)
 	bus_name = serializers.CharField(source='bus.name', read_only=True)
+	bus_seat_capacity = serializers.IntegerField(source='bus.seat_capacity', read_only=True)
+	route_stops = serializers.SerializerMethodField()
 
 	class Meta:
 		model = Trip
@@ -17,15 +19,27 @@ class TripSerializer(serializers.ModelSerializer):
 			'route_name',
 			'bus',
 			'bus_name',
+			'bus_seat_capacity',
+			'route_stops',
 			'driver',
 			'departure_datetime',
 			'seats_left',
 			'archived_at',
 			'created_at',
 		]
-		read_only_fields = ['id', 'seats_left', 'archived_at', 'created_at', 'route_name', 'bus_name']
+		read_only_fields = ['id', 'seats_left', 'created_at', 'route_name', 'bus_name']
+
+	def get_route_stops(self, obj):
+		# Ordered stop names; RouteStation.Meta.ordering is ['order'].
+		return [rs.station.name for rs in obj.route.route_stations.all()]
 
 	def validate(self, data):
+		# Archiving is for trips that already left. Archiving a future trip would
+		# hide its bookings from students while still counting them against the
+		# one-seat-per-night rule, so they could neither cancel nor rebook.
+		if data.get('archived_at') and self.instance is not None and self.instance.departure_datetime > now():
+			raise serializers.ValidationError('Only trips that have already departed can be archived.')
+
 		# Enforce operating hours (21:00–06:00, no 02:00)
 		if 'departure_datetime' in data:
 			dt = data['departure_datetime']

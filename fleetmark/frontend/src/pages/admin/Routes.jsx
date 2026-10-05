@@ -2,12 +2,14 @@ import React, { useEffect, useState } from "react";
 import SkeletonTable from "../../components/ui/SkeletonTable";
 import SetupProgress from "../../components/ui/SetupProgress";
 import AdminEmptyState from "../../components/ui/AdminEmptyState";
-import { API_BASE } from "../../services/api";
+import { API_BASE, getAccessToken, authFetch, errorMessage } from "../../services/api";
+import { useTranslation } from "../../context/TranslationContext";
 
 
 const emptyForm = { name: "", window: "peak", station_ids: [] };
 
 export default function Routes() {
+  const { t } = useTranslation();
   const [routes, setRoutes] = useState([]);
   const [stations, setStations] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -20,11 +22,10 @@ export default function Routes() {
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
 
-  const token = localStorage.getItem("fleetmark_access");
+  const token = getAccessToken();
   const headers = { 
     Authorization: `Bearer ${token}`, 
     "Content-Type": "application/json",
-    "X-API-Key": import.meta.env.VITE_API_KEY
   };
 
   async function load(preserveSelectionId = null) {
@@ -32,20 +33,18 @@ export default function Routes() {
     setError("");
     try {
       const [rRes, sRes] = await Promise.all([
-        fetch(`${API_BASE}/routes/`, { 
+        authFetch(`${API_BASE}/routes/`, { 
           headers: { 
             Authorization: `Bearer ${token}`,
-            "X-API-Key": import.meta.env.VITE_API_KEY
           } 
         }),
-        fetch(`${API_BASE}/stations/`, { 
+        authFetch(`${API_BASE}/stations/`, { 
           headers: { 
             Authorization: `Bearer ${token}`,
-            "X-API-Key": import.meta.env.VITE_API_KEY
           } 
         }),
       ]);
-      if (!rRes.ok) throw new Error("Failed to load routes.");
+      if (!rRes.ok) throw new Error(t("routesLoadFailed"));
       const [rData, sData] = await Promise.all([rRes.json(), sRes.json()]);
       const list = Array.isArray(rData) ? rData : [];
       setRoutes(list);
@@ -56,7 +55,7 @@ export default function Routes() {
         setSelected(list[0] || null);
       }
     } catch (err) {
-      setError(err.message || "Unable to load routes.");
+      setError(err.message || t("routesLoadUnable"));
     } finally {
       setLoading(false);
     }
@@ -77,6 +76,7 @@ export default function Routes() {
   function openCreate() {
     setEditing(null);
     setForm(emptyForm);
+    setError("");
     setOpen(true);
   }
 
@@ -87,6 +87,7 @@ export default function Routes() {
       window: route.window || "peak",
       station_ids: (route.stations || []).map((s) => s.station.id),
     });
+    setError("");
     setOpen(true);
   }
 
@@ -100,8 +101,8 @@ export default function Routes() {
   }
 
   async function save() {
-    if (!form.name || !form.window) {
-      setError("All fields are required.");
+    if (!form.name || !form.window || !form.station_ids.length) {
+      setError(t("routesValidation"));
       return;
     }
     setSaving(true);
@@ -110,16 +111,13 @@ export default function Routes() {
       const payload = { name: form.name, window: form.window, station_ids: form.station_ids };
       const endpoint = editing ? `${API_BASE}/routes/${editing.id}/` : `${API_BASE}/routes/`;
       const method = editing ? "PUT" : "POST";
-      const res = await fetch(endpoint, { method, headers, body: JSON.stringify(payload) });
-      if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        throw new Error(data?.detail || data?.name?.[0] || `Save failed (${res.status}).`);
-      }
+      const res = await authFetch(endpoint, { method, headers, body: JSON.stringify(payload) });
+      if (!res.ok) throw new Error(await errorMessage(res, t("saveFailed")));
       const savedRoute = await res.json();
       setOpen(false);
       await load(savedRoute.id);
     } catch (err) {
-      setError(err.message || "Save failed.");
+      setError(err.message || t("saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -127,12 +125,13 @@ export default function Routes() {
 
   async function remove(id) {
     try {
-      const res = await fetch(`${API_BASE}/routes/${id}/`, { method: "DELETE", headers });
-      if (!res.ok) throw new Error("Delete failed.");
+      const res = await authFetch(`${API_BASE}/routes/${id}/`, { method: "DELETE", headers });
+      if (!res.ok) throw new Error(await errorMessage(res, t("itemDeleteFailed")));
       setConfirmDelete(null);
       await load();
     } catch (err) {
-      setError(err.message || "Delete failed.");
+      setConfirmDelete(null);
+      setError(err.message || t("itemDeleteFailed"));
     }
   }
 
@@ -149,11 +148,11 @@ export default function Routes() {
       {!routes.length && !error ? (
         <AdminEmptyState variant="routes" onAction={openCreate} />
       ) : (
-      <div className="animate-in" style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: "var(--space-5)" }}>
+      <div className="animate-in" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 320px), 1fr))", gap: "var(--space-5)" }}>
       {/* Sidebar with Route List */}
       <aside style={{ border: "1px solid var(--line2)", borderRadius: "var(--radius-md)", background: "var(--surface)", padding: "var(--space-4)", display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h2 style={{ margin: 0 }}>Routes</h2>
+          <h2 style={{ margin: 0 }}>{t("navRoutes")}</h2>
           <button
             type="button"
             onClick={openCreate}
@@ -172,7 +171,7 @@ export default function Routes() {
             }}
           >
             <span className="material-symbols-outlined" style={{ fontSize: 16 }}>add</span>
-            New
+            {t("newShort")}
           </button>
         </div>
         
@@ -200,13 +199,13 @@ export default function Routes() {
               <div>
                 <span>{route.name}</span>
                 <span className="mono" style={{ display: "block", fontSize: 10, color: "var(--dim)", marginTop: 2 }}>
-                  {route.stations?.length || 0} stops
+                  {t("stopsCount").replace("{{n}}", route.stations?.length || 0)}
                 </span>
               </div>
               <span className="material-symbols-outlined" style={{ fontSize: 16, color: selected?.id === route.id ? "var(--blue)" : "var(--dim)" }}>chevron_right</span>
             </button>
           ))}
-          {!routes.length ? <p style={{ color: "var(--mid)", margin: 0, fontSize: 14 }}>No routes found.</p> : null}
+          {!routes.length ? <p style={{ color: "var(--mid)", margin: 0, fontSize: 14 }}>{t("routesNone")}</p> : null}
         </div>
       </aside>
 
@@ -218,7 +217,7 @@ export default function Routes() {
               <div>
                 <h2 style={{ margin: "0 0 var(--space-2) 0" }}>{selected.name}</h2>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span className="mono" style={{ fontSize: 11, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.1em" }}>Window:</span>
+                  <span className="mono" style={{ fontSize: 11, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.1em" }}>{t("routesWindowLabel")}</span>
                   <span style={{ 
                     background: "var(--surface2)", 
                     padding: "2px 8px", 
@@ -227,37 +226,37 @@ export default function Routes() {
                     textTransform: "capitalize",
                     color: "var(--ink)"
                   }}>
-                    {selected.window || "-"}
+                    {selected.window ? t(`window_${selected.window}`) : "-"}
                   </span>
                 </div>
               </div>
               <div style={{ display: "flex", gap: 8 }}>
                 <button type="button" onClick={() => openEdit(selected)} style={{ border: "1px solid var(--line2)", background: "var(--surface2)", color: "var(--ink)", borderRadius: 6, padding: "6px 12px", fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
                   <span className="material-symbols-outlined" style={{ fontSize: 16 }}>edit</span>
-                  Edit
+                  {t("edit")}
                 </button>
                 <button type="button" onClick={() => setConfirmDelete(selected)} style={{ border: "1px solid color-mix(in srgb, var(--red) 40%, transparent)", background: "var(--red-bg)", color: "var(--red)", borderRadius: 6, padding: "6px 12px", fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
                   <span className="material-symbols-outlined" style={{ fontSize: 16 }}>delete</span>
-                  Delete
+                  {t("delete")}
                 </button>
               </div>
             </div>
 
-            <h3 style={{ fontSize: 14, color: "var(--mid)", marginTop: "var(--space-6)", marginBottom: "var(--space-3)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Route Stations</h3>
+            <h3 style={{ fontSize: 14, color: "var(--mid)", marginTop: "var(--space-6)", marginBottom: "var(--space-3)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{t("routesStations")}</h3>
             <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)" }}>
               {(selected.stations || []).map((stop) => (
                 <span key={`${stop.order}-${stop.station.id}`} className="mono" style={{ border: "1px solid var(--line2)", borderRadius: "999px", padding: "6px 10px", background: "var(--surface2)", color: "var(--ink)", fontSize: 13 }}>
                   {stop.order}. {stop.station.name}
                 </span>
               ))}
-              {!selected.stations?.length ? <p style={{ color: "var(--mid)", margin: 0, fontSize: 14 }}>No stops configured for this route.</p> : null}
+              {!selected.stations?.length ? <p style={{ color: "var(--mid)", margin: 0, fontSize: 14 }}>{t("routesNoStops")}</p> : null}
             </div>
           </div>
         ) : (
           <div style={{ display: "grid", placeItems: "center", height: "100%", color: "var(--mid)", textAlign: "center" }}>
             <div>
               <span className="material-symbols-outlined" style={{ fontSize: 48, opacity: 0.5, marginBottom: 16 }}>map</span>
-              <p style={{ margin: 0 }}>Select a route to view details.</p>
+              <p style={{ margin: 0 }}>{t("routesSelectHint")}</p>
             </div>
           </div>
         )}
@@ -267,38 +266,39 @@ export default function Routes() {
 
       {/* Create / Edit Modal */}
       {open ? (
-        <div className="modal-backdrop-anim" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "grid", placeItems: "center", zIndex: 20 }}>
-          <div style={{ width: "min(560px,92vw)", maxHeight: "85vh", overflowY: "auto", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-md)", padding: "var(--space-6)", display: "grid", gap: "var(--space-3)" }}>
-            <h3 style={{ margin: 0 }}>{editing ? "Edit Route" : "Add New Route"}</h3>
+        <div className="modal-backdrop-anim" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "grid", placeItems: "center", zIndex: 1000 }}>
+          <div role="dialog" aria-modal="true" style={{ width: "min(560px,92vw)", maxHeight: "85vh", overflowY: "auto", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-md)", padding: "var(--space-6)", display: "grid", gap: "var(--space-3)" }}>
+            <h3 style={{ margin: 0 }}>{editing ? t("routesEdit") : t("routesAdd")}</h3>
+            {error ? <p role="alert" style={{ color: "var(--red)", fontSize: 13, margin: 0 }}>{error}</p> : null}
             <div style={{ display: "grid", gap: "var(--space-2)" }}>
-              <label style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--mid)", fontWeight: 700 }}>Route Name</label>
+              <label style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--mid)", fontWeight: 700 }}>{t("routesName")}</label>
               <input
                 value={form.name}
                 onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
-                placeholder="e.g. Bus 2 Route"
+                placeholder={t("routesNamePh")}
                 style={{ background: "var(--surface2)", color: "var(--ink)", border: "1px solid var(--line)", borderRadius: 8, padding: 10 }}
               />
             </div>
             <div style={{ display: "grid", gap: "var(--space-2)" }}>
-              <label style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--mid)", fontWeight: 700 }}>Service Window</label>
+              <label style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--mid)", fontWeight: 700 }}>{t("routesServiceWindow")}</label>
               <select
                 value={form.window}
                 onChange={(e) => setForm((p) => ({ ...p, window: e.target.value }))}
                 style={{ background: "var(--surface2)", color: "var(--ink)", border: "1px solid var(--line)", borderRadius: 8, padding: 10 }}
               >
-                <option value="peak">Peak</option>
-                <option value="consolidated">Consolidated</option>
+                <option value="peak">{t("window_peak")}</option>
+                <option value="consolidated">{t("window_consolidated")}</option>
               </select>
             </div>
 
             {/* Station Picker */}
             <div style={{ display: "grid", gap: "var(--space-2)" }}>
               <label style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--mid)", fontWeight: 700 }}>
-                Stations ({form.station_ids.length} selected)
+                {t("routesStationsPicker").replace("{{n}}", form.station_ids.length)}
               </label>
               <div style={{ border: "1px solid var(--line)", borderRadius: 8, padding: 8, maxHeight: 220, overflowY: "auto", display: "grid", gap: 4 }}>
                 {stations.length === 0 ? (
-                  <p style={{ margin: 0, color: "var(--dim)", fontSize: 13, padding: 8, textAlign: "center" }}>No stations available.</p>
+                  <p style={{ margin: 0, color: "var(--dim)", fontSize: 13, padding: 8, textAlign: "center" }}>{t("routesNoStations")}</p>
                 ) : (
                   stations.map((station) => {
                     const checked = form.station_ids.includes(station.id);
@@ -323,9 +323,14 @@ export default function Routes() {
                           onChange={() => toggleStation(station.id)}
                           style={{ accentColor: "var(--blue)", width: 16, height: 16 }}
                         />
-                        <span style={{ fontSize: 13, fontWeight: checked ? 700 : 400, color: checked ? "var(--blue)" : "var(--ink)" }}>
+                        <span style={{ fontSize: 13, fontWeight: checked ? 700 : 400, color: checked ? "var(--blue)" : "var(--ink)", flex: 1 }}>
                           {station.name}
                         </span>
+                        {checked ? (
+                          <span className="mono" style={{ fontSize: 11, fontWeight: 700, color: "var(--blue)" }}>
+                            #{form.station_ids.indexOf(station.id) + 1}
+                          </span>
+                        ) : null}
                       </label>
                     );
                   })
@@ -335,10 +340,10 @@ export default function Routes() {
 
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: "var(--space-2)" }}>
               <button type="button" onClick={() => setOpen(false)} style={{ border: "1px solid var(--line)", background: "var(--surface2)", color: "var(--ink)", borderRadius: 8, padding: "9px 12px", cursor: "pointer" }}>
-                Cancel
+                {t("cancel")}
               </button>
               <button type="button" onClick={save} disabled={saving} style={{ border: "1px solid var(--blue-bdr)", background: "var(--blue-bg)", color: "var(--blue)", borderRadius: 8, padding: "9px 12px", fontWeight: 700, cursor: "pointer" }}>
-                {saving ? "Saving..." : "Save"}
+                {saving ? t("savingDots") : t("save")}
               </button>
             </div>
           </div>
@@ -347,19 +352,18 @@ export default function Routes() {
 
       {/* Delete Confirmation Modal */}
       {confirmDelete ? (
-        <div className="modal-backdrop-anim" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "grid", placeItems: "center", zIndex: 20 }}>
-          <div style={{ width: "min(420px,90vw)", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-md)", padding: "var(--space-6)", display: "grid", gap: "var(--space-4)" }}>
-            <h3 style={{ margin: 0 }}>Delete Route</h3>
+        <div className="modal-backdrop-anim" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "grid", placeItems: "center", zIndex: 1000 }}>
+          <div role="dialog" aria-modal="true" style={{ width: "min(420px,90vw)", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-md)", padding: "var(--space-6)", display: "grid", gap: "var(--space-4)" }}>
+            <h3 style={{ margin: 0 }}>{t("routesDeleteTitle")}</h3>
             <p style={{ margin: 0, color: "var(--mid)" }}>
-              Are you sure you want to delete route <strong>{confirmDelete.name}</strong>?
-              This action cannot be undone.
+              {t("routesDeleteLead")} <strong>{confirmDelete.name}</strong>{t("qMark")} {t("cannotUndo")}
             </p>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
               <button type="button" onClick={() => setConfirmDelete(null)} style={{ border: "1px solid var(--line)", background: "var(--surface2)", color: "var(--ink)", borderRadius: 8, padding: "9px 12px", cursor: "pointer" }}>
-                Cancel
+                {t("cancel")}
               </button>
               <button type="button" onClick={() => remove(confirmDelete.id)} style={{ border: "1px solid color-mix(in srgb, var(--red) 40%, transparent)", background: "var(--red-bg)", color: "var(--red)", borderRadius: 8, padding: "9px 12px", fontWeight: 700, cursor: "pointer" }}>
-                Delete
+                {t("delete")}
               </button>
             </div>
           </div>

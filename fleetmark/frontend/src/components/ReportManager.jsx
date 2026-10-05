@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { reports } from '../services/api';
+import { useTranslation } from '../context/TranslationContext';
 
 const ReportManager = () => {
+  const { t } = useTranslation();
   const [reportList, setReportList] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -10,6 +12,7 @@ const ReportManager = () => {
 
   useEffect(() => {
     loadReports();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadReports = async () => {
@@ -19,7 +22,7 @@ const ReportManager = () => {
       const data = await reports.list();
       setReportList(data || []);
     } catch (err) {
-      setError(err.message || 'Failed to load reports.');
+      setError(err.message || t("reportsLoadFailed"));
     } finally {
       setLoading(false);
     }
@@ -31,7 +34,7 @@ const ReportManager = () => {
       await reports.update(id, { status: 'resolved' });
       loadReports();
     } catch (err) {
-      setResolveError('Failed to update report status: ' + (err.message || 'unknown error'));
+      setResolveError(t("reportsResolveFailed").replace("{{error}}", err.message || t("unknownError")));
     }
   };
 
@@ -41,14 +44,14 @@ const ReportManager = () => {
   });
 
   const getCategoryLabel = (cat) => {
-    const labels = {
-      'late':     '🕒 Late',
-      'no_show':  '🚫 No Show',
-      'full':     '👥 Full',
-      'accident': '⚠️ Accident',
-      'other':    '📝 Other',
+    const icons = {
+      'late':     '🕒',
+      'no_show':  '🚫',
+      'full':     '👥',
+      'accident': '⚠️',
+      'other':    '📝',
     };
-    return labels[cat] || cat;
+    return icons[cat] ? `${icons[cat]} ${t(`reportCat_${cat}`)}` : cat;
   };
 
   return (
@@ -63,7 +66,7 @@ const ReportManager = () => {
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
         <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>
-          <span style={{ marginRight: 8 }}>📋</span>Incident Reports
+          <span style={{ marginRight: 8 }}>📋</span>{t("reportsIncidentReports")}
         </h2>
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
           <select
@@ -79,9 +82,9 @@ const ReportManager = () => {
               cursor: "pointer",
             }}
           >
-            <option value="all">All Reports</option>
-            <option value="pending">Pending Review</option>
-            <option value="resolved">Resolved</option>
+            <option value="all">{t("reportsAll")}</option>
+            <option value="pending">{t("reportsPendingReview")}</option>
+            <option value="resolved">{t("reportsResolved")}</option>
           </select>
           <button
             onClick={loadReports}
@@ -103,7 +106,7 @@ const ReportManager = () => {
             }}
           >
             <span className="material-symbols-outlined" style={{ fontSize: 16 }}>refresh</span>
-            {loading ? "Loading…" : "Refresh"}
+            {loading ? t("loading") : t("refresh")}
           </button>
         </div>
       </div>
@@ -147,9 +150,9 @@ const ReportManager = () => {
               textAlign: "left",
               borderBottom: "1px solid color-mix(in srgb, var(--line) 30%, transparent)",
             }}>
-              {["Date", "Reporter", "Trip Info", "Category", "Status", ""].map((col, i) => (
+              {["colDate", "colReporter", "colTripInfo", "colCategory", "colStatus", "colActions"].map((col, i) => (
                 <th
-                  key={col || "actions"}
+                  key={col}
                   scope="col"
                   style={{
                     padding: "14px 16px",
@@ -161,7 +164,7 @@ const ReportManager = () => {
                     textAlign: i === 5 ? "right" : "left",
                   }}
                 >
-                  {col || "Actions"}
+                  {t(col)}
                 </th>
               ))}
             </tr>
@@ -182,7 +185,7 @@ const ReportManager = () => {
                     <span className="material-symbols-outlined" style={{ fontSize: 32, color: "var(--dim)", opacity: 0.6 }}>
                       search_off
                     </span>
-                    <span>No incident reports found for this filter.</span>
+                    <span>{t("reportsNoneFilter")}</span>
                   </div>
                 </td>
               </tr>
@@ -216,12 +219,12 @@ const ReportManager = () => {
                       <div style={{ display: "grid", gap: 2 }}>
                         <div style={{ fontWeight: 600, fontSize: 13 }}>{report.trip_details.route}</div>
                         <div style={{ fontSize: 12, color: "var(--mid)" }}>
-                          Departure: {new Date(report.trip_details.departure).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                          {t("reportsDepartureAt").replace("{{time}}", new Date(report.trip_details.departure).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))}
                         </div>
-                        <div style={{ fontSize: 12, color: "var(--mid)" }}>Bus: {report.trip_details.bus}</div>
+                        <div style={{ fontSize: 12, color: "var(--mid)" }}>{t("reportsBusLine").replace("{{bus}}", report.trip_details.bus)}</div>
                       </div>
                     ) : (
-                      <span style={{ color: "var(--dim)", fontSize: 13 }}>N/A</span>
+                      <span style={{ color: "var(--dim)", fontSize: 13 }}>{t("notAvailable")}</span>
                     )}
                   </td>
 
@@ -259,7 +262,7 @@ const ReportManager = () => {
                         }`,
                       }}
                     >
-                      {report.status}
+                      {t(`reportStatus_${report.status}`)}
                     </span>
                   </td>
 
@@ -284,7 +287,7 @@ const ReportManager = () => {
                         }}
                       >
                         <span className="material-symbols-outlined" style={{ fontSize: 14 }}>check</span>
-                        Resolve
+                        {t("reportsResolve")}
                       </button>
                     )}
                     {report.status === "resolved" && (

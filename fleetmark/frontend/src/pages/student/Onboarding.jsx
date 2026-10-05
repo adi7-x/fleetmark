@@ -1,11 +1,16 @@
 import React, { useState } from "react";
 import StopPicker from "../../components/shared/StopPicker";
 import Spinner from "../../components/ui/Spinner";
-import { API_BASE } from "../../services/api";
+import { API_BASE, authFetch, errorMessage } from "../../services/api";
+import { useTranslation } from "../../context/TranslationContext";
+import { useAuth } from "../../context/AuthContext";
+import LanguageSwitcher from "../../components/shared/LanguageSwitcher";
 
 
 export default function Onboarding() {
-  const [selectedStation, setSelectedStation] = useState("");
+  const { t, lang, setLang } = useTranslation();
+  const { user } = useAuth();
+  const [selectedStation, setSelectedStation] = useState(user?.station || "");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -15,37 +20,35 @@ export default function Onboarding() {
     setError("");
 
     try {
-      const token = localStorage.getItem("fleetmark_access");
-      if (!token) throw new Error("Missing access token.");
-
-      const res = await fetch(`${API_BASE}/auth/me/`, {
+      const res = await authFetch(`${API_BASE}/auth/me/`, {
         method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`, "X-API-Key": import.meta.env.VITE_API_KEY,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ station: selectedStation }),
       });
 
-      if (!res.ok) throw new Error(`Failed to set station (${res.status}).`);
+      if (!res.ok) throw new Error(await errorMessage(res, t("saveStationFailed")));
       const updated = await res.json();
       localStorage.setItem("fleetmark_user", JSON.stringify(updated));
       window.location.replace("/passenger");
     } catch (err) {
-      setError(err.message || "Failed to save station.");
+      setError(err.message || t("saveStationFailed"));
     } finally {
       setLoading(false);
     }
   }
 
-  if (loading) return <Spinner size={36} text="Saving your station..." />;
+  if (loading) return <Spinner size={36} text={t("savingStation")} />;
 
   return (
     <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", background: "var(--bg)", color: "var(--ink)", padding: "var(--space-6)" }}>
-      <section className="animate-in" style={{ width: "100%", maxWidth: 760, background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-lg)", padding: "var(--space-7)" }}>
-        <h1 style={{ margin: 0, fontSize: 34, letterSpacing: "-0.03em" }}>Choose your home station</h1>
+      <section className="animate-in" style={{ width: "100%", maxWidth: 760, boxSizing: "border-box", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-lg)", padding: "var(--space-7)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: "var(--space-5)" }}>
+          <span style={{ fontWeight: 800, fontSize: 18, letterSpacing: "-0.02em" }}>Fleetmark</span>
+          <LanguageSwitcher value={lang} onChange={setLang} />
+        </div>
+        <h1 style={{ margin: 0, fontSize: "clamp(26px, 6vw, 34px)", letterSpacing: "-0.03em" }}>{t("onbTitle")}</h1>
         <p style={{ color: "var(--mid)", marginTop: "var(--space-2)" }}>
-          Select the station that should be used for your available trip feed.
+          {t("onbDesc")}
         </p>
 
         <div style={{ marginTop: "var(--space-6)" }}>
@@ -68,7 +71,7 @@ export default function Onboarding() {
               cursor: "pointer",
             }}
           >
-            Skip
+            {t("skip")}
           </button>
           <button
             type="button"
@@ -84,7 +87,7 @@ export default function Onboarding() {
               cursor: selectedStation ? "pointer" : "not-allowed",
             }}
           >
-            Continue
+            {t("continue")}
           </button>
         </div>
       </section>

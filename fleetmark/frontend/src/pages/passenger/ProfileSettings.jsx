@@ -1,104 +1,107 @@
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useState } from "react";
 import StopPicker from "../../components/shared/StopPicker";
+import { useAuth } from "../../context/AuthContext";
+import { useTranslation } from "../../context/TranslationContext";
+import { API_BASE, authFetch, errorMessage } from "../../services/api";
 
-import { API_BASE, getUser } from "../../services/api";
+const section = {
+  border: "1px solid var(--border)",
+  borderRadius: 16,
+  background: "var(--surface)",
+  padding: "var(--space-6)",
+  display: "grid",
+  gap: "var(--space-4)",
+  boxShadow: "var(--shadow-sm)",
+};
 
-const PROFILE_KEY = "fleetmark_student_profile";
+const btn = (tone) => ({
+  border: `1px solid var(--${tone}-border)`,
+  borderRadius: 10,
+  padding: "10px 18px",
+  background: `var(--${tone}-light)`,
+  color: `var(--${tone})`,
+  fontWeight: 700,
+  cursor: "pointer",
+  fontSize: 14,
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 6,
+  justifySelf: "start",
+});
 
-function getProfile() {
-  try { return JSON.parse(localStorage.getItem(PROFILE_KEY) || "{}"); } catch { return {}; }
-}
-function saveProfile(data) {
-  localStorage.setItem(PROFILE_KEY, JSON.stringify(data));
-}
-
-function getInitials(login) {
-  if (!login) return "?";
-  return login.slice(0, 2).toUpperCase();
+function Message({ msg }) {
+  if (!msg) return null;
+  const ok = msg.type === "ok";
+  return (
+    <span role={ok ? "status" : "alert"} style={{ fontSize: 12, color: ok ? "var(--green)" : "var(--red)", display: "flex", alignItems: "center", gap: 4 }}>
+      <span className="material-symbols-outlined" style={{ fontSize: 14, fontVariationSettings: "'FILL' 1" }}>{ok ? "check_circle" : "error"}</span>
+      {msg.text}
+    </span>
+  );
 }
 
 export default function ProfileSettings() {
-  const user = useMemo(() => getUser(), []);
+  const { user, setUser, logout } = useAuth();
+  const { t, lang, setLang } = useTranslation();
   const [selected, setSelected] = useState(user?.station || "");
-  const [lang, setLang] = useState(localStorage.getItem("fleetmark_lang") || "en");
-  const [error, setError] = useState("");
-  const [saved, setSaved] = useState(false);
+  const [stationMsg, setStationMsg] = useState(null);
+  const [dataMsg, setDataMsg] = useState(null);
   const [exporting, setExporting] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  // 2FA state
+  // 2FA
   const [twoFAEnabled, setTwoFAEnabled] = useState(user?.totp_enabled || false);
-  const [twoFASetup, setTwoFASetup] = useState(null); // { secret, provisioning_uri }
+  const [twoFASetup, setTwoFASetup] = useState(null); // { secret, qr_code }
   const [twoFACode, setTwoFACode] = useState("");
   const [twoFALoading, setTwoFALoading] = useState(false);
-  const [twoFAMsg, setTwoFAMsg] = useState("");
+  const [twoFAMsg, setTwoFAMsg] = useState(null);
 
-  // Profile fields
-  const [nickname, setNickname] = useState("");
-  const [profileSaved, setProfileSaved] = useState(false);
-
-  useEffect(() => {
-    const profile = getProfile();
-    if (profile.nickname) setNickname(profile.nickname);
-  }, []);
+  async function post(path, body) {
+    return authFetch(`${API_BASE}/${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  }
 
   async function saveStation() {
-    setError("");
-    setSaved(false);
+    setStationMsg(null);
     try {
-      const token = localStorage.getItem("fleetmark_access");
-      const res = await fetch(`${API_BASE}/auth/me/`, {
+      const res = await authFetch(`${API_BASE}/auth/me/`, {
         method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`, "X-API-Key": import.meta.env.VITE_API_KEY,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ station: selected }),
       });
-      if (!res.ok) throw new Error("Failed to update station.");
-      const updated = await res.json();
-      localStorage.setItem("fleetmark_user", JSON.stringify(updated));
-      setSaved(true);
-      setTimeout(() => setSaved(false), 1800);
+      if (!res.ok) throw new Error(await errorMessage(res, t("saveStationFailed")));
+      // Through AuthContext so the header's station chip updates too.
+      setUser(await res.json());
+      setStationMsg({ type: "ok", text: t("saved") });
     } catch (err) {
-      setError(err.message || "Update failed.");
+      setStationMsg({ type: "err", text: err.message });
     }
   }
 
-  function handleSaveProfile() {
-    const profile = getProfile();
-    profile.nickname = nickname.trim();
-    saveProfile(profile);
-    setProfileSaved(true);
-    setTimeout(() => setProfileSaved(false), 1800);
-  }
-
-  function signOut() {
-    localStorage.removeItem("fleetmark_access");
-    localStorage.removeItem("fleetmark_refresh");
-    localStorage.removeItem("fleetmark_user");
+  async function signOut() {
+    await logout();
     window.location.replace("/");
   }
 
   async function handleExportData() {
     setExporting(true);
+    setDataMsg(null);
     try {
-      const token = localStorage.getItem("fleetmark_access");
-      const res = await fetch(`${API_BASE}/auth/me/export/`, {
-        headers: { Authorization: `Bearer ${token}`, "X-API-Key": import.meta.env.VITE_API_KEY },
-      });
-      if (!res.ok) throw new Error("Export failed.");
-      const data = await res.json();
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const res = await authFetch(`${API_BASE}/auth/me/export/`);
+      if (!res.ok) throw new Error(await errorMessage(res, t("exportFailed")));
+      const blob = new Blob([JSON.stringify(await res.json(), null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
       a.download = "fleetmark-data-export.json";
       a.click();
       URL.revokeObjectURL(url);
-    } catch {
-      setError("Failed to export data.");
+    } catch (err) {
+      setDataMsg({ type: "err", text: err.message });
     } finally {
       setExporting(false);
     }
@@ -107,16 +110,11 @@ export default function ProfileSettings() {
   async function handleDeleteAccount() {
     setDeleting(true);
     try {
-      const token = localStorage.getItem("fleetmark_access");
-      const res = await fetch(`${API_BASE}/auth/me/delete/`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "X-API-Key": import.meta.env.VITE_API_KEY },
-      });
-      if (!res.ok) throw new Error("Deletion failed.");
-      signOut();
-    } catch {
-      setError("Failed to delete account.");
-    } finally {
+      const res = await post("auth/me/delete/");
+      if (!res.ok) throw new Error(await errorMessage(res, t("deleteFailed")));
+      await signOut();
+    } catch (err) {
+      setDataMsg({ type: "err", text: err.message });
       setDeleting(false);
       setShowDeleteConfirm(false);
     }
@@ -124,663 +122,209 @@ export default function ProfileSettings() {
 
   async function handleSetup2FA() {
     setTwoFALoading(true);
-    setTwoFAMsg("");
+    setTwoFAMsg(null);
     try {
-      const token = localStorage.getItem("fleetmark_access");
-      const res = await fetch(`${API_BASE}/auth/2fa/setup/`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "X-API-Key": import.meta.env.VITE_API_KEY },
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || "Setup failed.");
-      }
-      const data = await res.json();
-      setTwoFASetup(data);
+      const res = await post("auth/2fa/setup/");
+      if (!res.ok) throw new Error(await errorMessage(res, t("twoFaSetupFailed")));
+      setTwoFASetup(await res.json());
     } catch (err) {
-      setTwoFAMsg(err.message || "Failed to setup 2FA.");
+      setTwoFAMsg({ type: "err", text: err.message });
     } finally {
       setTwoFALoading(false);
     }
   }
 
-  async function handleVerify2FA() {
+  async function submitCode(path, enable) {
     setTwoFALoading(true);
-    setTwoFAMsg("");
+    setTwoFAMsg(null);
     try {
-      const token = localStorage.getItem("fleetmark_access");
-      const res = await fetch(`${API_BASE}/auth/2fa/verify/`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-          "X-API-Key": import.meta.env.VITE_API_KEY,
-        },
-        body: JSON.stringify({ code: twoFACode }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || "Invalid code.");
-      }
-      setTwoFAEnabled(true);
+      const res = await post(path, { code: twoFACode });
+      if (!res.ok) throw new Error(await errorMessage(res, t("twoFaInvalidCode")));
+      setTwoFAEnabled(enable);
       setTwoFASetup(null);
       setTwoFACode("");
-      setTwoFAMsg("2FA enabled successfully!");
-      setTimeout(() => setTwoFAMsg(""), 3000);
+      setUser({ ...user, totp_enabled: enable });
+      setTwoFAMsg({ type: "ok", text: enable ? t("twoFaEnabledMsg") : t("twoFaDisabledMsg") });
     } catch (err) {
-      setTwoFAMsg(err.message || "Verification failed.");
+      setTwoFAMsg({ type: "err", text: err.message });
     } finally {
       setTwoFALoading(false);
     }
   }
 
-  async function handleDisable2FA() {
-    setTwoFALoading(true);
-    setTwoFAMsg("");
-    try {
-      const token = localStorage.getItem("fleetmark_access");
-      const res = await fetch(`${API_BASE}/auth/2fa/disable/`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-          "X-API-Key": import.meta.env.VITE_API_KEY,
-        },
-        body: JSON.stringify({ code: twoFACode }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || "Invalid code.");
-      }
-      setTwoFAEnabled(false);
-      setTwoFACode("");
-      setTwoFAMsg("2FA disabled.");
-      setTimeout(() => setTwoFAMsg(""), 3000);
-    } catch (err) {
-      setTwoFAMsg(err.message || "Failed to disable 2FA.");
-    } finally {
-      setTwoFALoading(false);
-    }
-  }
-
-  const login = user?.login_42 || "student";
+  const login = user?.login_42 || "";
+  const roleLabel = { STUDENT: t("roleStudent"), LOGISTICS_STAFF: t("roleStaff"), DRIVER: t("roleDriver") }[user?.role] || user?.role;
+  const codeReady = twoFACode.length === 6 && !twoFALoading;
 
   return (
     <div className="animate-in" style={{ display: "grid", gap: "var(--space-5)", maxWidth: 640 }}>
-      {/* ── Avatar + identity card ─────────────── */}
-      <section
-        style={{
-          border: "1px solid var(--border)",
-          borderRadius: 16,
-          background: "var(--surface)",
-          padding: "var(--space-6)",
-          display: "grid",
-          gap: "var(--space-4)",
-          boxShadow: "var(--shadow-sm)",
-          textAlign: "center",
-        }}
-      >
-        {/* Avatar */}
-        <div
-          style={{
-            width: 80,
-            height: 80,
-            borderRadius: "50%",
-            background: "linear-gradient(135deg, var(--blue), var(--blue2, var(--blue)))",
-            display: "grid",
-            placeItems: "center",
-            margin: "0 auto",
-            boxShadow: "0 4px 20px var(--accent-glow, rgba(99,102,241,0.2))",
-          }}
-        >
-          <span style={{ fontSize: 28, fontWeight: 800, color: "#fff", letterSpacing: "0.04em" }}>
-            {getInitials(login)}
-          </span>
+      {/* Identity */}
+      <section style={{ ...section, textAlign: "center" }}>
+        <div style={{ width: 80, height: 80, borderRadius: "50%", margin: "0 auto", overflow: "hidden", background: "linear-gradient(135deg, var(--blue), var(--blue2, var(--blue)))", display: "grid", placeItems: "center" }}>
+          {user?.avatar_url ? (
+            <img src={user.avatar_url} alt="" width={80} height={80} style={{ objectFit: "cover" }} />
+          ) : (
+            <span style={{ fontSize: 28, fontWeight: 800, color: "#fff" }}>{login.slice(0, 2).toUpperCase()}</span>
+          )}
         </div>
-
         <div>
-          <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>
-            {nickname || login}
-          </h2>
-          <p className="mono" style={{ margin: "4px 0 0", color: "var(--mid)", fontSize: 13 }}>
-            @{login}
-          </p>
+          <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>{login}</h2>
+          <p style={{ margin: "4px 0 0", color: "var(--mid)", fontSize: 13 }}>{user?.email}</p>
         </div>
-
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "center",
-            gap: "var(--space-5)",
-            padding: "12px 0 4px",
-            borderTop: "1px solid var(--border)",
-          }}
-        >
-          <div style={{ textAlign: "center" }}>
-            <span style={{ fontSize: 10, textTransform: "uppercase", color: "var(--dim)", fontWeight: 700 }}>Role</span>
-            <div style={{ fontSize: 14, fontWeight: 600, marginTop: 4 }}>
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 4,
-                  padding: "2px 10px",
-                  borderRadius: 999,
-                  background: "var(--blue-light)",
-                  color: "var(--blue)",
-                  fontSize: 12,
-                  fontWeight: 700,
-                  border: "1px solid var(--blue-border)",
-                }}
-              >
-                {user?.role || "Student"}
-              </span>
-            </div>
+        <div style={{ display: "flex", justifyContent: "center", gap: "var(--space-5)", flexWrap: "wrap", paddingTop: 12, borderTop: "1px solid var(--border)" }}>
+          <div>
+            <span style={{ fontSize: 10, textTransform: "uppercase", color: "var(--dim)", fontWeight: 700 }}>{t("usersRole")}</span>
+            <div style={{ marginTop: 4, fontSize: 13, fontWeight: 700, color: "var(--blue)" }}>{roleLabel}</div>
           </div>
-          <div style={{ textAlign: "center" }}>
-            <span style={{ fontSize: 10, textTransform: "uppercase", color: "var(--dim)", fontWeight: 700 }}>ID</span>
-            <div className="mono" style={{ fontSize: 14, fontWeight: 600, marginTop: 4, color: "var(--mid)" }}>
-              #{user?.id ? String(user.id).slice(0, 8) : "—"}
-            </div>
-          </div>
-          <div style={{ textAlign: "center" }}>
-            <span style={{ fontSize: 10, textTransform: "uppercase", color: "var(--dim)", fontWeight: 700 }}>Email</span>
-            <div style={{ fontSize: 12, fontWeight: 500, marginTop: 4, color: "var(--mid)" }}>
-              {user?.email || "N/A"}
-            </div>
+          <div>
+            <span style={{ fontSize: 10, textTransform: "uppercase", color: "var(--dim)", fontWeight: 700 }}>{t("statMyStop")}</span>
+            <div style={{ marginTop: 4, fontSize: 13, fontWeight: 600 }}>{user?.station_name || t("statNotSet")}</div>
           </div>
         </div>
       </section>
 
-      {/* ── Nickname ───────────────────────────── */}
-      <section
-        style={{
-          border: "1px solid var(--border)",
-          borderRadius: 16,
-          background: "var(--surface)",
-          padding: "var(--space-6)",
-          display: "grid",
-          gap: "var(--space-3)",
-          boxShadow: "var(--shadow-sm)",
-        }}
-      >
-        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Nickname</h3>
-        <p style={{ margin: 0, fontSize: 13, color: "var(--mid)" }}>
-          Set a display name. This is saved locally on your device.
-        </p>
-        <div style={{ display: "flex", gap: 10 }}>
-          <input
-            value={nickname}
-            onChange={(e) => setNickname(e.target.value)}
-            placeholder={login}
-            maxLength={30}
-            style={{
-              flex: 1,
-              background: "var(--surface2)",
-              color: "var(--text-primary)",
-              border: "1px solid var(--border)",
-              borderRadius: 10,
-              padding: "10px 14px",
-              fontSize: 14,
-              transition: "border-color 0.15s ease",
-            }}
-          />
-          <button
-            type="button"
-            onClick={handleSaveProfile}
-            style={{
-              border: "1px solid var(--blue-border)",
-              borderRadius: 10,
-              padding: "10px 18px",
-              background: "var(--blue-light)",
-              color: "var(--blue)",
-              fontWeight: 700,
-              cursor: "pointer",
-              fontSize: 14,
-              transition: "all 0.15s ease",
-              whiteSpace: "nowrap",
-            }}
-          >
-            Save
-          </button>
+      {/* Home station */}
+      <section style={section}>
+        <div>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>{t("homeStation")}</h3>
+          <p style={{ margin: "6px 0 0", fontSize: 13, color: "var(--mid)" }}>{t("homeStationDesc")}</p>
         </div>
-        {profileSaved && (
-          <span style={{ fontSize: 12, color: "var(--green)", display: "flex", alignItems: "center", gap: 4 }}>
-            <span className="material-symbols-outlined" style={{ fontSize: 14, fontVariationSettings: "'FILL' 1" }}>check_circle</span>
-            Saved
-          </span>
-        )}
-      </section>
-
-      {/* ── Home station ───────────────────────── */}
-      <section
-        style={{
-          border: "1px solid var(--border)",
-          borderRadius: 16,
-          background: "var(--surface)",
-          padding: "var(--space-6)",
-          display: "grid",
-          gap: "var(--space-4)",
-          boxShadow: "var(--shadow-sm)",
-        }}
-      >
-        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Home Station</h3>
-        <p style={{ margin: 0, fontSize: 13, color: "var(--mid)" }}>
-          Select your primary departure campus.
-        </p>
         <StopPicker selected={selected} onSelect={setSelected} />
-        <div style={{ display: "flex", gap: "var(--space-3)", alignItems: "center" }}>
-          <button
-            type="button"
-            onClick={saveStation}
-            style={{
-              border: "1px solid var(--blue-border)",
-              borderRadius: 10,
-              padding: "10px 18px",
-              background: "var(--blue-light)",
-              color: "var(--blue)",
-              fontWeight: 700,
-              cursor: "pointer",
-              fontSize: 14,
-              transition: "all 0.15s ease",
-            }}
-          >
-            Save Station
+        <div style={{ display: "flex", gap: "var(--space-3)", alignItems: "center", flexWrap: "wrap" }}>
+          <button type="button" onClick={saveStation} disabled={!selected || selected === user?.station} style={{ ...btn("blue"), opacity: !selected || selected === user?.station ? 0.5 : 1 }}>
+            {t("saveStation")}
           </button>
-          {saved ? (
-            <span style={{ color: "var(--green)", fontSize: 12, display: "flex", alignItems: "center", gap: 4 }}>
-              <span className="material-symbols-outlined" style={{ fontSize: 14, fontVariationSettings: "'FILL' 1" }}>check_circle</span>
-              Saved
-            </span>
-          ) : null}
-          {error ? <span style={{ color: "var(--red)", fontSize: 12 }}>{error}</span> : null}
+          <Message msg={stationMsg} />
         </div>
       </section>
 
-      {/* ── Language ────────────────────────────── */}
-      <section
-        style={{
-          border: "1px solid var(--border)",
-          borderRadius: 16,
-          background: "var(--surface)",
-          padding: "var(--space-6)",
-          display: "grid",
-          gap: "var(--space-4)",
-          boxShadow: "var(--shadow-sm)",
-        }}
-      >
-        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Language</h3>
-        <p style={{ margin: 0, fontSize: 13, color: "var(--mid)" }}>
-          Choose your preferred interface language.
-        </p>
+      {/* Language */}
+      <section style={section}>
+        <div>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>{t("language")}</h3>
+          <p style={{ margin: "6px 0 0", fontSize: 13, color: "var(--mid)" }}>{t("languageDesc")}</p>
+        </div>
         <div style={{ display: "flex", gap: 8 }}>
-          {[{ id: "en", label: "English", flag: "🇬🇧" }, { id: "fr", label: "Français", flag: "🇫🇷" }, { id: "ar", label: "العربية", flag: "🇲🇦" }].map((l) => (
+          {[{ id: "en", label: "English" }, { id: "fr", label: "Français" }].map((l) => (
             <button
               key={l.id}
               type="button"
-              onClick={() => {
-                setLang(l.id);
-                localStorage.setItem("fleetmark_lang", l.id);
-                document.documentElement.setAttribute("data-lang", l.id);
-              }}
+              onClick={() => setLang(l.id)}
+              aria-pressed={lang === l.id}
               style={{
                 flex: 1,
                 border: lang === l.id ? "2px solid var(--blue)" : "1px solid var(--border)",
                 borderRadius: 10,
-                padding: "10px 8px",
+                padding: "12px 8px",
                 background: lang === l.id ? "var(--blue-light)" : "var(--surface2)",
                 color: lang === l.id ? "var(--blue)" : "var(--text-primary)",
                 fontWeight: lang === l.id ? 700 : 500,
                 cursor: "pointer",
-                fontSize: 13,
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: 4,
-                transition: "all 0.15s ease",
+                fontSize: 14,
               }}
             >
-              <span style={{ fontSize: 20 }}>{l.flag}</span>
               {l.label}
             </button>
           ))}
         </div>
       </section>
 
-
-      {/* ── Two-Factor Authentication ──────────── */}
-      <section
-        style={{
-          border: "1px solid var(--border)",
-          borderRadius: 16,
-          background: "var(--surface)",
-          padding: "var(--space-6)",
-          display: "grid",
-          gap: "var(--space-4)",
-          boxShadow: "var(--shadow-sm)",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      {/* Two-factor authentication */}
+      <section style={section}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <span className="material-symbols-outlined" style={{ fontSize: 20, color: twoFAEnabled ? "var(--green)" : "var(--amber)" }}>
             {twoFAEnabled ? "verified_user" : "security"}
           </span>
-          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Two-Factor Authentication</h3>
-          {twoFAEnabled && (
-            <span
-              style={{
-                fontSize: 11,
-                fontWeight: 700,
-                color: "var(--green)",
-                background: "color-mix(in srgb, var(--green) 10%, transparent)",
-                border: "1px solid var(--green)",
-                borderRadius: 999,
-                padding: "2px 10px",
-              }}
-            >
-              Enabled
-            </span>
-          )}
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>{t("twoFaTitle")}</h3>
+          {twoFAEnabled ? (
+            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--green)", border: "1px solid var(--green)", borderRadius: 999, padding: "2px 10px" }}>{t("twoFaOn")}</span>
+          ) : null}
         </div>
-        <p style={{ margin: 0, fontSize: 13, color: "var(--mid)" }}>
-          {twoFAEnabled
-            ? "Your account is protected with TOTP two-factor authentication."
-            : "Add an extra layer of security using a TOTP authenticator app."}
-        </p>
+        <p style={{ margin: 0, fontSize: 13, color: "var(--mid)" }}>{twoFAEnabled ? t("twoFaOnDesc") : t("twoFaOffDesc")}</p>
 
-        {/* Setup flow — show QR provisioning URI */}
-        {twoFASetup && !twoFAEnabled && (
-          <div
-            style={{
-              padding: "var(--space-4)",
-              borderRadius: 12,
-              background: "var(--surface2)",
-              border: "1px solid var(--line2)",
-              display: "grid",
-              gap: "var(--space-3)",
-            }}
-          >
-            <p style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>
-              Scan this with your authenticator app:
-            </p>
-            <div
-              style={{
-                padding: "var(--space-3)",
-                borderRadius: 8,
-                background: "var(--surface)",
-                border: "1px solid var(--border)",
-                fontFamily: "monospace",
-                fontSize: 12,
-                wordBreak: "break-all",
-                color: "var(--mid)",
-              }}
-            >
+        {twoFASetup && !twoFAEnabled ? (
+          <div style={{ padding: "var(--space-4)", borderRadius: 12, background: "var(--surface2)", border: "1px solid var(--line2)", display: "grid", gap: "var(--space-3)", justifyItems: "start" }}>
+            <p style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>{t("twoFaScan")}</p>
+            {twoFASetup.qr_code ? (
+              <img src={twoFASetup.qr_code} alt={t("twoFaQrAlt")} width={180} height={180} style={{ background: "#fff", padding: 10, borderRadius: 10 }} />
+            ) : null}
+            <p style={{ margin: 0, fontSize: 12, color: "var(--dim)" }}>{t("twoFaManual")}</p>
+            <code style={{ padding: "8px 10px", borderRadius: 8, background: "var(--surface)", border: "1px solid var(--border)", fontSize: 12, wordBreak: "break-all", color: "var(--mid)" }}>
               {twoFASetup.secret}
-            </div>
-            <p style={{ margin: 0, fontSize: 11, color: "var(--dim)" }}>
-              Or enter this secret manually in your authenticator app (Google Authenticator, Authy, etc.)
-            </p>
+            </code>
           </div>
-        )}
+        ) : null}
 
-        {/* Code input for verify / disable */}
-        {(twoFASetup || twoFAEnabled) && (
-          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+        {twoFASetup || twoFAEnabled ? (
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <input
               value={twoFACode}
               onChange={(e) => setTwoFACode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-              placeholder="6-digit code"
+              placeholder="123456"
+              aria-label={t("twoFaCodeLabel")}
               maxLength={6}
               inputMode="numeric"
               autoComplete="one-time-code"
-              style={{
-                width: 120,
-                background: "var(--surface2)",
-                color: "var(--text-primary)",
-                border: "1px solid var(--border)",
-                borderRadius: 10,
-                padding: "10px 14px",
-                fontSize: 16,
-                fontFamily: "monospace",
-                letterSpacing: "0.2em",
-                textAlign: "center",
-              }}
+              style={{ width: 130, background: "var(--surface2)", color: "var(--text-primary)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 14px", fontSize: 16, fontFamily: "monospace", letterSpacing: "0.2em", textAlign: "center" }}
             />
-            {twoFASetup && !twoFAEnabled && (
-              <button
-                type="button"
-                onClick={handleVerify2FA}
-                disabled={twoFALoading || twoFACode.length !== 6}
-                style={{
-                  border: "1px solid var(--green, #22c55e)",
-                  borderRadius: 10,
-                  padding: "10px 18px",
-                  background: "color-mix(in srgb, var(--green) 10%, transparent)",
-                  color: "var(--green)",
-                  fontWeight: 700,
-                  cursor: twoFACode.length === 6 ? "pointer" : "not-allowed",
-                  fontSize: 14,
-                  opacity: twoFACode.length !== 6 ? 0.5 : 1,
-                }}
-              >
-                {twoFALoading ? "Verifying…" : "Enable 2FA"}
+            {twoFAEnabled ? (
+              <button type="button" disabled={!codeReady} onClick={() => submitCode("auth/2fa/disable/", false)} style={{ ...btn("red"), opacity: codeReady ? 1 : 0.5 }}>
+                {twoFALoading ? t("loading") : t("twoFaDisable")}
               </button>
-            )}
-            {twoFAEnabled && (
-              <button
-                type="button"
-                onClick={handleDisable2FA}
-                disabled={twoFALoading || twoFACode.length !== 6}
-                style={{
-                  border: "1px solid var(--red-border)",
-                  borderRadius: 10,
-                  padding: "10px 18px",
-                  background: "var(--red-light)",
-                  color: "var(--red)",
-                  fontWeight: 700,
-                  cursor: twoFACode.length === 6 ? "pointer" : "not-allowed",
-                  fontSize: 14,
-                  opacity: twoFACode.length !== 6 ? 0.5 : 1,
-                }}
-              >
-                {twoFALoading ? "Disabling…" : "Disable 2FA"}
+            ) : (
+              <button type="button" disabled={!codeReady} onClick={() => submitCode("auth/2fa/verify/", true)} style={{ ...btn("green"), opacity: codeReady ? 1 : 0.5 }}>
+                {twoFALoading ? t("loading") : t("twoFaEnable")}
               </button>
             )}
           </div>
-        )}
-
-        {/* Setup button when not started */}
-        {!twoFASetup && !twoFAEnabled && (
-          <button
-            type="button"
-            onClick={handleSetup2FA}
-            disabled={twoFALoading}
-            style={{
-              border: "1px solid var(--blue-border)",
-              borderRadius: 10,
-              padding: "10px 18px",
-              background: "var(--blue-light)",
-              color: "var(--blue)",
-              fontWeight: 700,
-              cursor: twoFALoading ? "wait" : "pointer",
-              fontSize: 14,
-              justifySelf: "start",
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-            }}
-          >
+        ) : (
+          <button type="button" onClick={handleSetup2FA} disabled={twoFALoading} style={btn("blue")}>
             <span className="material-symbols-outlined" style={{ fontSize: 16 }}>lock</span>
-            {twoFALoading ? "Setting up…" : "Setup 2FA"}
+            {twoFALoading ? t("loading") : t("twoFaSetup")}
           </button>
         )}
-
-        {twoFAMsg && (
-          <span
-            style={{
-              fontSize: 12,
-              color: twoFAMsg.includes("success") || twoFAMsg.includes("enabled") ? "var(--green)" : "var(--red)",
-              display: "flex",
-              alignItems: "center",
-              gap: 4,
-            }}
-          >
-            <span className="material-symbols-outlined" style={{ fontSize: 14, fontVariationSettings: "'FILL' 1" }}>
-              {twoFAMsg.includes("success") || twoFAMsg.includes("enabled") || twoFAMsg.includes("disabled") ? "check_circle" : "error"}
-            </span>
-            {twoFAMsg}
-          </span>
-        )}
+        <Message msg={twoFAMsg} />
       </section>
 
-      {/* ── Your Data (GDPR) ───────────────────── */}
-      <section
-        style={{
-          border: "1px solid var(--border)",
-          borderRadius: 16,
-          background: "var(--surface)",
-          padding: "var(--space-6)",
-          display: "grid",
-          gap: "var(--space-4)",
-          boxShadow: "var(--shadow-sm)",
-        }}
-      >
+      {/* Your data (GDPR) */}
+      <section style={section}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span className="material-symbols-outlined" style={{ fontSize: 20, color: "var(--blue)" }}>shield</span>
-          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Your Data</h3>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>{t("yourData")}</h3>
         </div>
-        <p style={{ margin: 0, fontSize: 13, color: "var(--mid)" }}>
-          Export all your personal data or request account deletion under GDPR.
-        </p>
-        <div style={{ display: "flex", gap: "var(--space-3)", flexWrap: "wrap" }}>
-          <button
-            type="button"
-            onClick={handleExportData}
-            disabled={exporting}
-            style={{
-              border: "1px solid var(--blue-border)",
-              borderRadius: 10,
-              padding: "10px 18px",
-              background: "var(--blue-light)",
-              color: "var(--blue)",
-              fontWeight: 700,
-              cursor: exporting ? "wait" : "pointer",
-              fontSize: 14,
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              opacity: exporting ? 0.6 : 1,
-              transition: "all 0.15s ease",
-            }}
-          >
+        <p style={{ margin: 0, fontSize: 13, color: "var(--mid)" }}>{t("yourDataDesc")}</p>
+        <div style={{ display: "flex", gap: "var(--space-3)", flexWrap: "wrap", alignItems: "center" }}>
+          <button type="button" onClick={handleExportData} disabled={exporting} style={{ ...btn("blue"), opacity: exporting ? 0.6 : 1 }}>
             <span className="material-symbols-outlined" style={{ fontSize: 16 }}>download</span>
-            {exporting ? "Exporting…" : "Export My Data"}
+            {exporting ? t("loading") : t("exportData")}
           </button>
           {!showDeleteConfirm ? (
-            <button
-              type="button"
-              onClick={() => setShowDeleteConfirm(true)}
-              style={{
-                border: "1px solid var(--red-border)",
-                borderRadius: 10,
-                padding: "10px 18px",
-                background: "var(--red-light)",
-                color: "var(--red)",
-                fontWeight: 700,
-                cursor: "pointer",
-                fontSize: 14,
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                transition: "all 0.15s ease",
-              }}
-            >
+            <button type="button" onClick={() => setShowDeleteConfirm(true)} style={btn("red")}>
               <span className="material-symbols-outlined" style={{ fontSize: 16 }}>delete_forever</span>
-              Delete My Account
+              {t("deleteAccount")}
             </button>
           ) : (
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "var(--space-2)",
-                padding: "8px 14px",
-                border: "1px solid var(--red-border)",
-                borderRadius: 10,
-                background: "var(--red-light)",
-              }}
-            >
-              <span style={{ fontSize: 12, color: "var(--red)", fontWeight: 600 }}>Are you sure?</span>
-              <button
-                type="button"
-                onClick={handleDeleteAccount}
-                disabled={deleting}
-                style={{
-                  border: "none",
-                  borderRadius: 8,
-                  padding: "6px 14px",
-                  background: "var(--red)",
-                  color: "#fff",
-                  fontWeight: 700,
-                  cursor: deleting ? "wait" : "pointer",
-                  fontSize: 12,
-                }}
-              >
-                {deleting ? "Deleting…" : "Confirm"}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", border: "1px solid var(--red-border)", borderRadius: 10, background: "var(--red-light)", flexWrap: "wrap" }}>
+              <span style={{ fontSize: 12, color: "var(--red)", fontWeight: 600 }}>{t("deleteAccountConfirm")}</span>
+              <button type="button" onClick={handleDeleteAccount} disabled={deleting} style={{ border: "none", borderRadius: 8, padding: "6px 14px", background: "var(--red)", color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 12 }}>
+                {deleting ? t("loading") : t("confirm")}
               </button>
-              <button
-                type="button"
-                onClick={() => setShowDeleteConfirm(false)}
-                style={{
-                  border: "none",
-                  background: "transparent",
-                  color: "var(--mid)",
-                  cursor: "pointer",
-                  fontSize: 12,
-                  fontWeight: 600,
-                }}
-              >
-                Cancel
+              <button type="button" onClick={() => setShowDeleteConfirm(false)} style={{ border: "none", background: "transparent", color: "var(--mid)", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+                {t("cancel")}
               </button>
             </div>
           )}
         </div>
+        <Message msg={dataMsg} />
       </section>
 
-      {/* ── Sign out ───────────────────────────── */}
-      <section
-        style={{
-          border: "1px solid var(--red-border)",
-          borderRadius: 16,
-          background: "var(--red-light)",
-          padding: "var(--space-5)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-        }}
-      >
+      {/* Sign out */}
+      <section style={{ ...section, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
         <div>
-          <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: "var(--red)" }}>Sign Out</h3>
-          <p style={{ margin: "2px 0 0", fontSize: 12, color: "var(--mid)" }}>
-            This will clear your session.
-          </p>
+          <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>{t("navLogout")}</h3>
+          <p style={{ margin: "2px 0 0", fontSize: 12, color: "var(--mid)" }}>{t("signOutDesc")}</p>
         </div>
-        <button
-          type="button"
-          onClick={signOut}
-          style={{
-            border: "1px solid var(--red-border)",
-            borderRadius: 10,
-            padding: "10px 18px",
-            background: "var(--red-light)",
-            color: "var(--red)",
-            cursor: "pointer",
-            fontWeight: 700,
-            fontSize: 14,
-            transition: "all 0.15s ease",
-          }}
-        >
-          Sign Out
-        </button>
+        <button type="button" onClick={signOut} style={btn("red")}>{t("navLogout")}</button>
       </section>
     </div>
   );

@@ -1,0 +1,100 @@
+%% FLEETMARK / SSBS — Data model / ERD (derived from every apps/*/models.py)
+%% on_delete rules and unique constraints noted in comments.
+erDiagram
+    USER ||--o{ RESERVATION : "makes (student, CASCADE)"
+    TRIP ||--o{ RESERVATION : "has (CASCADE)"
+    ROUTE ||--o{ TRIP : "scheduled as (PROTECT)"
+    BUS ||--o{ TRIP : "assigned to (PROTECT)"
+    DRIVER ||--o{ TRIP : "driven by (PROTECT)"
+    ROUTE ||--o{ ROUTESTATION : "includes (CASCADE)"
+    STATION ||--o{ ROUTESTATION : "listed in (PROTECT)"
+    STATION |o--o{ USER : "home station (SET_NULL)"
+    USER ||--o{ INCIDENTREPORT : "files (reporter, CASCADE)"
+    TRIP |o--o{ INCIDENTREPORT : "about (SET_NULL)"
+    USER ||--o{ ANNOUNCEMENTDISMISSAL : "dismisses (CASCADE)"
+    ANNOUNCEMENT ||--o{ ANNOUNCEMENTDISMISSAL : "dismissed via (CASCADE)"
+    BUS |o--o{ DRIVER : "default bus (SET_NULL)"
+    DRIVER }o--o{ ROUTE : "default routes (M2M)"
+
+    USER {
+        uuid id PK
+        string login_42 UK "nullable"
+        string email UK
+        string role "STUDENT | LOGISTICS_STAFF | DRIVER"
+        uuid station_id FK "nullable"
+        bool is_active
+        bool is_staff
+        string totp_secret "nullable"
+        bool totp_enabled
+        datetime created_at
+    }
+    STATION {
+        uuid id PK
+        string name UK
+        datetime created_at
+    }
+    BUS {
+        uuid id PK
+        string name
+        string plate UK
+        int seat_capacity
+        datetime created_at
+    }
+    DRIVER {
+        uuid id PK
+        string name
+        string username UK
+        string password "hashed"
+        string status "active | inactive"
+        uuid default_bus_id FK "nullable"
+        datetime created_at
+    }
+    ROUTE {
+        uuid id PK
+        string name UK
+        string window "peak | consolidated"
+        datetime created_at
+    }
+    ROUTESTATION {
+        int id PK
+        uuid route_id FK
+        uuid station_id FK
+        int order "unique (route,order) and (route,station)"
+    }
+    TRIP {
+        uuid id PK
+        uuid route_id FK
+        uuid bus_id FK
+        uuid driver_id FK
+        datetime departure_datetime
+        datetime archived_at "nullable"
+        datetime created_at
+    }
+    RESERVATION {
+        uuid id PK
+        uuid trip_id FK
+        uuid student_id FK
+        datetime created_at "unique (trip, student)"
+    }
+    INCIDENTREPORT {
+        uuid id PK
+        uuid reporter_id FK
+        uuid trip_id FK "nullable"
+        string category "late | no_show | full | accident | other"
+        text description
+        string status "pending | resolved"
+        datetime created_at
+    }
+    ANNOUNCEMENT {
+        uuid id PK
+        string title
+        text message
+        string priority "info | warning | urgent"
+        datetime created_at
+    }
+    ANNOUNCEMENTDISMISSAL {
+        int id PK
+        uuid user_id FK
+        uuid announcement_id FK
+        datetime dismissed_at "unique (user, announcement)"
+    }

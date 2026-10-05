@@ -50,6 +50,10 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',  # must be first
     'django.middleware.security.SecurityMiddleware',
+    # WhiteNoise serves collected static files (Django admin, DRF/Spectacular
+    # UI) directly from gunicorn in production, so no separate static server
+    # is needed. Must sit right after SecurityMiddleware. Harmless in dev.
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -112,12 +116,28 @@ TIME_ZONE = 'Africa/Casablanca'
 USE_I18N = True
 
 STATIC_URL = 'static/'
+# Target for `collectstatic`, run by the backend entrypoint in production so
+# gunicorn+WhiteNoise can serve admin/DRF assets. Unused by runserver in dev.
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+STORAGES = {
+    'default': {
+        'BACKEND': 'django.core.files.storage.FileSystemStorage',
+    },
+    'staticfiles': {
+        'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage',
+    },
+}
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 CORS_ALLOWED_ORIGINS = [
     'https://localhost:8443',
 ]
+# Required so the browser sends/accepts the refresh-token cookie on
+# cross-origin requests (e.g. frontend dev server on :5173 talking to the
+# backend directly on :8000, outside the WAF). Safe alongside an explicit
+# CORS_ALLOWED_ORIGINS allowlist (never paired with "allow all").
+CORS_ALLOW_CREDENTIALS = True
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
@@ -136,7 +156,23 @@ REST_FRAMEWORK = {
     'DEFAULT_THROTTLE_RATES': {
         'anon': '100/hour',
         'user': '1000/hour',
+        # Session upkeep, not open API browsing: the SPA refreshes its
+        # access token on every full page load, and the request carries no
+        # Authorization header (the credential is the HttpOnly cookie), so
+        # it counts as anonymous. Sharing the 100/hour anon budget meant a
+        # normal browsing session could rate-limit itself out of the app.
+        # The endpoint is useless without a valid refresh cookie, so a
+        # higher ceiling costs nothing and still caps abuse.
+        'token_refresh': '600/hour',
     },
+    # Behind the WAF every request arrives from the proxy, so REMOTE_ADDR is
+    # the same container IP for everyone. Telling DRF exactly one proxy sits
+    # in front makes it take the client IP that nginx itself appended to
+    # X-Forwarded-For. Without this DRF keys the throttle on the *whole*
+    # X-Forwarded-For string, which the client controls — so anyone could
+    # mint a fresh rate-limit bucket per request just by varying the header
+    # and bypass throttling entirely.
+    'NUM_PROXIES': 1,
     'EXCEPTION_HANDLER': 'apps.core.exception_handler.api_exception_handler',
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
 }
@@ -177,6 +213,20 @@ USE_X_FORWARDED_PORT = True
 # Public API Key
 # ──────────────────────────────────────────────────────────────────────────────
 SSBS_API_KEY = get_secret('api', 'key', os.environ.get('SSBS_API_KEY', ''))
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Production hardening — gated on DEBUG so local/eval runs (APP_DEBUG=true)
+# behave exactly as before. Set APP_DEBUG=false for a real deployment to
+# turn these on; the WAF already sends X-Forwarded-Proto (see
+# SECURE_PROXY_SSL_HEADER above) so SECURE_SSL_REDIRECT won't loop.
+# ──────────────────────────────────────────────────────────────────────────────
+SECURE_SSL_REDIRECT = not DEBUG
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_HSTS_SECONDS = 0 if DEBUG else 31536000
+SECURE_HSTS_INCLUDE_SUBDOMAINS = not DEBUG
+SECURE_HSTS_PRELOAD = not DEBUG
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Logging

@@ -181,10 +181,31 @@ services:
 
   # ──────────────────────────────────────────────────────────────────────────
   # ELK Stack Services
+  #
+  # Opt-in via `docker compose --profile observability up` — NOT started by
+  # a plain `docker compose up`. Two reasons: (1) it's a genuinely heavy
+  # stack (Elasticsearch alone wants real memory) that the core app doesn't
+  # need to run or to be evaluated, and (2) it needs its own TLS certs,
+  # generated below by elk-cert-init rather than a manual host-side step.
   # ──────────────────────────────────────────────────────────────────────────
+  elk-cert-init:
+    image: alpine:3.20
+    container_name: ssbs-elk-cert-init
+    restart: "no"
+    profiles: ["observability"]
+    volumes:
+      - ./elk/generate-certs.sh:/generate-certs.sh:ro
+      - ./elk/certs:/certs
+    entrypoint: /bin/sh
+    command: ["-c", "apk add --no-cache openssl >/dev/null && sh /generate-certs.sh"]
+
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:9.2.3
     container_name: elasticsearch
+    profiles: ["observability"]
+    depends_on:
+      elk-cert-init:
+        condition: service_completed_successfully
     environment:
       - node.name=elasticsearch
       - discovery.type=single-node
@@ -205,6 +226,7 @@ services:
   logstash:
     image: docker.elastic.co/logstash/logstash-oss:9.2.3
     container_name: logstash
+    profiles: ["observability"]
     env_file:
       - .env
     environment:
@@ -229,6 +251,7 @@ services:
   kibana:
     image: docker.elastic.co/kibana/kibana:9.2.3
     container_name: kibana
+    profiles: ["observability"]
     ports:
       - "5601:5601"
     environment:
@@ -251,6 +274,7 @@ services:
   elk-setup:
     image: curlimages/curl:latest
     container_name: elk-setup
+    profiles: ["observability"]
     environment:
       - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
     volumes:
@@ -288,8 +312,13 @@ networks:
 # Volumes
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 volumes:
+  # No hard `name:` pin here on purpose — a global name is shared across
+  # *any* compose project on the host with a volume by this name, which is
+  # exactly what caused a stale/partial node_modules from an unrelated
+  # project ("lastproject") to get mounted into this frontend container.
+  # Leaving it unpinned scopes it to this project (e.g.
+  # "fleetmark-transcendence_ssbs-frontend-node-modules").
   ssbs-frontend-node-modules:
-    name: ssbs-frontend-node-modules
   elasticsearch-data:
   vault-data:
     name: ssbs-vault-data

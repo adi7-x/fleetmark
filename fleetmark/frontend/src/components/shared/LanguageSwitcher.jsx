@@ -1,15 +1,12 @@
 import React from "react";
 
-const ALL_LANGS = [
+const LANGS = [
   { id: "en", label: "EN" },
   { id: "fr", label: "FR" },
-  { id: "ar", label: "AR" },
 ];
 
-const LIMITED_LANGS = ALL_LANGS.filter((lang) => lang.id !== "ar");
-
-export default function LanguageSwitcher({ variant = "limited", value = "en", onChange }) {
-  const options = variant === "full" ? ALL_LANGS : LIMITED_LANGS;
+export default function LanguageSwitcher({ value = "en", onChange }) {
+  const options = LANGS;
 
   return (
     <div

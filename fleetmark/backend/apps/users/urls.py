@@ -1,13 +1,15 @@
 from django.urls import path
-from rest_framework_simplejwt.views import TokenRefreshView
 
 from apps.users.views import (
+    CookieTokenRefreshView,
     GDPRAccountDeleteView,
     GDPRDataExportView,
+    LogoutView,
     OAuth42CallbackView,
     OAuth42LoginView,
     ProfileView,
     TOTPDisableView,
+    TOTPLoginVerifyView,
     TOTPSetupView,
     TOTPVerifyView,
     UserDetailView,
@@ -19,8 +21,9 @@ urlpatterns = [
     path('42/login/', OAuth42LoginView.as_view(), name='oauth-42-login'),
     path('42/callback/', OAuth42CallbackView.as_view(), name='oauth-42-callback'),
 
-    # JWT token refresh
-    path('token/refresh/', TokenRefreshView.as_view(), name='token-refresh'),
+    # JWT token refresh — reads the refresh token from an HttpOnly cookie
+    path('token/refresh/', CookieTokenRefreshView.as_view(), name='token-refresh'),
+    path('logout/', LogoutView.as_view(), name='logout'),
 
     # Profile
     path('me/', ProfileView.as_view(), name='profile'),
@@ -33,6 +36,7 @@ urlpatterns = [
     path('2fa/setup/', TOTPSetupView.as_view(), name='totp-setup'),
     path('2fa/verify/', TOTPVerifyView.as_view(), name='totp-verify'),
     path('2fa/disable/', TOTPDisableView.as_view(), name='totp-disable'),
+    path('2fa/login-verify/', TOTPLoginVerifyView.as_view(), name='totp-login-verify'),
 
     # User management (logistics staff only)
     path('users/', UserListView.as_view(), name='user-list'),

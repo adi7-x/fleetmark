@@ -1,16 +1,16 @@
 import React from "react";
+import Avatar from "./Avatar";
 
 /**
  * UserIdentity — displays avatar + login + role.
  * Used in sidebar bottom of both Admin and Student layouts.
  *
- * login: string (42 Intra login)
- * role:  string (optional, e.g. "admin", "passenger")
- * compact: boolean — hide name/role, show avatar only (for collapsed sidebar)
+ * login:     string (42 Intra login)
+ * avatarUrl: string (42 profile image, optional — falls back to initials)
+ * role:      string (optional, e.g. "admin", "passenger")
+ * compact:   boolean — hide name/role, show avatar only (for collapsed sidebar)
  */
-export default function UserIdentity({ login = "—", role, compact = false }) {
-  const initials = login ? login.slice(0, 2).toUpperCase() : "??";
-
+export default function UserIdentity({ login = "—", avatarUrl, role, compact = false }) {
   return (
     <div
       style={{
@@ -22,27 +22,7 @@ export default function UserIdentity({ login = "—", role, compact = false }) {
         minWidth: 0,
       }}
     >
-      {/* Avatar circle */}
-      <div
-        aria-hidden="true"
-        style={{
-          width: 32,
-          height: 32,
-          borderRadius: "50%",
-          background: "var(--blue-mid)",
-          color: "var(--blue)",
-          display: "grid",
-          placeItems: "center",
-          fontSize: "var(--font-size-xs)",
-          fontWeight: "var(--font-bold)",
-          flexShrink: 0,
-          userSelect: "none",
-          fontFamily: "var(--font-mono)",
-          letterSpacing: "0.02em",
-        }}
-      >
-        {initials}
-      </div>
+      <Avatar login={login} avatarUrl={avatarUrl} size={32} />
 
       {/* Name + role */}
       {!compact && (

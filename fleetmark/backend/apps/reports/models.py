@@ -38,4 +38,4 @@ class IncidentReport(models.Model):
 		ordering = ['-created_at']
 
 	def __str__(self):
-		return f"{self.get_category_display()} by {self.reporter.username}"
+		return f"{self.get_category_display()} by {self.reporter.login_42 or self.reporter.email}"

@@ -2,6 +2,7 @@
 @import url("https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&display=block");
 @import "./tokens.css";
 @import "./components.css";
+@import "./nocturne.css";
 
 *, *::before, *::after {
   box-sizing: border-box;
@@ -92,13 +93,19 @@ textarea {
 
 /* ═══════════════════════════════════════════════════════
    Fix 1a — Entrance animations (fadeInUp with stagger)
+   Always-on entrance animations use fill-mode "backwards" (or end on
+   transform:none) so no transform lingers after they finish: a leftover
+   transform makes the element the containing block for position:fixed
+   descendants, which traps modal backdrops and overlays inside it.
 ═══════════════════════════════════════════════════════ */
 @keyframes fadeInUp {
   from { opacity: 0; transform: translateY(20px); }
-  to   { opacity: 1; transform: translateY(0); }
+  to   { opacity: 1; transform: none; }
 }
 .animate-in {
-  animation: fadeInUp 0.5s ease both;
+  animation: fadeInUp 0.5s ease backwards;
+  /* !important beats inline animation-fill-mode overrides in pages */
+  animation-fill-mode: backwards !important;
 }
 .animate-in:nth-child(1)  { animation-delay: 0s; }
 .animate-in:nth-child(2)  { animation-delay: 0.08s; }
@@ -121,7 +128,7 @@ textarea {
 }
 .reveal-section.is-visible {
   opacity: 1;
-  transform: translateY(0);
+  transform: none;
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -133,14 +140,14 @@ textarea {
 }
 @keyframes modalScale {
   from { opacity: 0; transform: scale(0.95); }
-  to { opacity: 1; transform: scale(1); }
+  to { opacity: 1; transform: none; }
 }
 
 .modal-backdrop-anim {
-  animation: backdropFade 0.22s ease-out forwards;
+  animation: backdropFade 0.22s ease-out backwards;
 }
 .modal-anim {
-  animation: modalScale 0.22s ease-out forwards;
+  animation: modalScale 0.22s ease-out backwards;
 }
 @keyframes backdropFadeOut {
   from { opacity: 1; }
@@ -171,10 +178,10 @@ textarea {
 @keyframes checkmarkFade {
   0%   { opacity: 0; transform: scale(0.8); }
   30%  { opacity: 1; transform: scale(1.05); }
-  100% { opacity: 1; transform: scale(1); }
+  100% { opacity: 1; transform: none; }
 }
 .success-checkmark {
-  animation: checkmarkFade 0.4s ease both;
+  animation: checkmarkFade 0.4s ease backwards;
 }
 .success-checkmark circle {
   stroke-dasharray: 166;
@@ -196,7 +203,7 @@ textarea {
 }
 .tour-step-active {
   opacity: 1;
-  transform: translateX(0);
+  transform: none;
   transition: opacity 0.3s ease, transform 0.3s ease;
 }
 .tour-step-exit {
@@ -335,78 +342,4 @@ textarea {
 }
 .landing-hamburger {
   display: none;
-}
-
-/* ═══════════════════════════════════════════
-   RTL Layout Support (Arabic)
-   ═══════════════════════════════════════════ */
-
-[data-lang="ar"] {
-  direction: rtl;
-  text-align: right;
-}
-
-/* Flip sidebar to right side */
-[data-lang="ar"] .layout-shell {
-  direction: rtl;
-}
-[data-lang="ar"] .sidebar {
-  border-left: 1px solid var(--line2);
-  border-right: none;
-}
-
-/* Flip flex layouts */
-[data-lang="ar"] .layout-header {
-  direction: rtl;
-}
-
-/* Keep Fleetmark brand in LTR */
-[data-lang="ar"] .brand-name,
-[data-lang="ar"] [dir="ltr"] {
-  direction: ltr;
-  unicode-bidi: isolate;
-}
-
-/* Form and input alignment */
-[data-lang="ar"] input,
-[data-lang="ar"] select,
-[data-lang="ar"] textarea {
-  text-align: right;
-}
-
-/* Table header/cell alignment */
-[data-lang="ar"] th,
-[data-lang="ar"] td {
-  text-align: right;
-}
-[data-lang="ar"] th:last-child,
-[data-lang="ar"] td:last-child {
-  text-align: left;
-}
-
-/* Flip material icons in buttons */
-[data-lang="ar"] .material-symbols-outlined {
-  direction: ltr;
-}
-
-/* Bottom nav for mobile */
-[data-lang="ar"] .bottom-nav {
-  direction: rtl;
-}
-
-/* Flip row-actions to left side */
-[data-lang="ar"] .row-actions {
-  direction: ltr;
-}
-
-/* Modal stays centered/LTR-ish */
-[data-lang="ar"] .modal-backdrop-anim > div {
-  direction: rtl;
-  text-align: right;
-}
-
-/* Mobile menu text alignment */
-[data-lang="ar"] .landing-mobile-menu a,
-[data-lang="ar"] .landing-mobile-menu button {
-  text-align: right;
 }

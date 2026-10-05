@@ -1,6 +1,7 @@
-import React, { useMemo } from "react";
+import React from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "./context/AuthContext";
+import { useTranslation } from "./context/TranslationContext";
 
 import ProtectedRoute from "./components/layout/ProtectedRoute";
 import StudentLayout from "./components/layout/StudentLayout";
@@ -22,7 +23,7 @@ import AdminRoutesPage from "./pages/admin/Routes";
 import Drivers from "./pages/admin/Drivers";
 import AdminReservations from "./pages/admin/Reservations";
 import Reports from "./pages/admin/Reports";
-import AdminSettings from "./pages/admin/Settings";
+import AdminUsers from "./pages/admin/Users";
 import Stations from "./pages/admin/Stations";
 import Announcements from "./pages/admin/Announcements";
 import Notifications from "./pages/passenger/Notifications";
@@ -32,22 +33,21 @@ import OnboardingTour from "./components/ui/OnboardingTour";
 import PrivacyPolicy from "./pages/legal/PrivacyPolicy";
 import TermsOfService from "./pages/legal/TermsOfService";
 
-function studentTitleForPath(pathname) {
-  if (pathname === "/passenger") return "Dashboard";
-  if (pathname === "/passenger/reserve") return "Book a Seat";
-  if (pathname === "/passenger/history") return "My Trips";
-  if (pathname === "/passenger/settings") return "Profile";
-  if (pathname === "/passenger/live-map") return "Track Bus";
-  if (pathname === "/passenger/notifications") return "Notifications";
-  return "Dashboard";
-}
+const STUDENT_TITLES = {
+  "/passenger": "navDashboard",
+  "/passenger/reserve": "quickBookSeat",
+  "/passenger/history": "quickMyTrips",
+  "/passenger/settings": "navProfile",
+  "/passenger/live-map": "navTracker",
+  "/passenger/notifications": "navNotifications",
+};
 
 function StudentShell({ children }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const lang = localStorage.getItem("fleetmark_lang") || "en";
-  const pageTitle = useMemo(() => studentTitleForPath(location.pathname), [location.pathname]);
+  const { t } = useTranslation();
+  const pageTitle = t(STUDENT_TITLES[location.pathname] || "navDashboard");
 
   return (
     <StudentLayout
@@ -59,11 +59,6 @@ function StudentShell({ children }) {
         navigate("/");
       }}
       pageTitle={pageTitle}
-      language={lang}
-      onLanguageChange={(next) => {
-        localStorage.setItem("fleetmark_lang", next);
-        document.documentElement.setAttribute("data-lang", next);
-      }}
     >
       <OnboardingTour role="STUDENT" />
       {children}
@@ -71,50 +66,35 @@ function StudentShell({ children }) {
   );
 }
 
-function adminTitleForPath(pathname) {
-  if (pathname === "/admin") return "Dashboard";
-  if (pathname === "/admin/trips") return "Trips Management";
-  if (pathname === "/admin/buses") return "Bus Management";
-  if (pathname === "/admin/stations") return "Stations";
-  if (pathname === "/admin/routes") return "Routes";
-  if (pathname === "/admin/drivers") return "Drivers";
-  if (pathname === "/admin/reservations") return "History";
-  if (pathname === "/admin/reports") return "Reports";
-  if (pathname === "/admin/announcements") return "Announcements";
-  if (pathname === "/admin/settings") return "Settings";
-  return "Admin";
-}
+const ADMIN_TITLES = {
+  "/admin": "navDashboard",
+  "/admin/trips": "navTrips",
+  "/admin/buses": "navBuses",
+  "/admin/stations": "navStations",
+  "/admin/routes": "navRoutes",
+  "/admin/drivers": "navDrivers",
+  "/admin/reservations": "navHistory",
+  "/admin/reports": "navReports",
+  "/admin/announcements": "navAnnouncements",
+  "/admin/users": "navUsers",
+};
 
 function AdminShell({ children }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const lang = localStorage.getItem("fleetmark_lang") || "en";
-  const pageTitle = useMemo(() => adminTitleForPath(location.pathname), [location.pathname]);
-
-  function handleNewTrip() {
-    if (location.pathname === "/admin/trips") {
-      window.dispatchEvent(new CustomEvent("fleetmark:new-trip"));
-    } else {
-      navigate("/admin/trips", { state: { openTripForm: true } });
-    }
-  }
+  const { t } = useTranslation();
+  const pageTitle = t(ADMIN_TITLES[location.pathname] || "navDashboard");
 
   return (
     <AdminLayout
       user={user}
       activePath={location.pathname}
       onNavigate={navigate}
-      onNewTrip={handleNewTrip}
       pageTitle={pageTitle}
       onLogout={() => {
         logout();
         navigate("/");
-      }}
-      language={lang}
-      onLanguageChange={(next) => {
-        localStorage.setItem("fleetmark_lang", next);
-        document.documentElement.setAttribute("data-lang", next);
       }}
     >
       <OnboardingTour role="LOGISTICS_STAFF" />
@@ -124,7 +104,7 @@ function AdminShell({ children }) {
 }
 
 function AppRoutes() {
-  const { user } = useAuth();
+  const { user, ready } = useAuth();
 
   return (
     <Routes>
@@ -136,7 +116,7 @@ function AppRoutes() {
       <Route
         path="/onboarding"
         element={
-          <ProtectedRoute role="STUDENT" user={user}>
+          <ProtectedRoute role="STUDENT" user={user} ready={ready}>
             <Onboarding />
           </ProtectedRoute>
         }
@@ -145,7 +125,7 @@ function AppRoutes() {
       <Route
         path="/passenger"
         element={
-          <ProtectedRoute role="STUDENT" user={user}>
+          <ProtectedRoute role="STUDENT" user={user} ready={ready}>
             <StudentShell>
               <PassengerOverview />
             </StudentShell>
@@ -155,7 +135,7 @@ function AppRoutes() {
       <Route
         path="/passenger/live-map"
         element={
-          <ProtectedRoute role="STUDENT" user={user}>
+          <ProtectedRoute role="STUDENT" user={user} ready={ready}>
             <StudentShell>
               <TripTracker />
             </StudentShell>
@@ -165,7 +145,7 @@ function AppRoutes() {
       <Route
         path="/passenger/reserve"
         element={
-          <ProtectedRoute role="STUDENT" user={user}>
+          <ProtectedRoute role="STUDENT" user={user} ready={ready}>
             <StudentShell>
               <ReserveASeat />
             </StudentShell>
@@ -175,7 +155,7 @@ function AppRoutes() {
       <Route
         path="/passenger/history"
         element={
-          <ProtectedRoute role="STUDENT" user={user}>
+          <ProtectedRoute role="STUDENT" user={user} ready={ready}>
             <StudentShell>
               <MyReservations />
             </StudentShell>
@@ -185,7 +165,7 @@ function AppRoutes() {
       <Route
         path="/passenger/settings"
         element={
-          <ProtectedRoute role="STUDENT" user={user}>
+          <ProtectedRoute role="STUDENT" user={user} ready={ready}>
             <StudentShell>
               <ProfileSettings />
             </StudentShell>
@@ -195,7 +175,7 @@ function AppRoutes() {
       <Route
         path="/passenger/notifications"
         element={
-          <ProtectedRoute role="STUDENT" user={user}>
+          <ProtectedRoute role="STUDENT" user={user} ready={ready}>
             <StudentShell>
               <Notifications />
             </StudentShell>
@@ -206,7 +186,7 @@ function AppRoutes() {
       <Route
         path="/admin"
         element={
-          <ProtectedRoute role="LOGISTICS_STAFF" user={user}>
+          <ProtectedRoute role="LOGISTICS_STAFF" user={user} ready={ready}>
             <AdminShell>
               <AdminOverview />
             </AdminShell>
@@ -216,7 +196,7 @@ function AppRoutes() {
       <Route
         path="/admin/trips"
         element={
-          <ProtectedRoute role="LOGISTICS_STAFF" user={user}>
+          <ProtectedRoute role="LOGISTICS_STAFF" user={user} ready={ready}>
             <AdminShell>
               <AdminTrips />
             </AdminShell>
@@ -226,7 +206,7 @@ function AppRoutes() {
       <Route
         path="/admin/buses"
         element={
-          <ProtectedRoute role="LOGISTICS_STAFF" user={user}>
+          <ProtectedRoute role="LOGISTICS_STAFF" user={user} ready={ready}>
             <AdminShell>
               <BusManagement />
             </AdminShell>
@@ -236,7 +216,7 @@ function AppRoutes() {
       <Route
         path="/admin/stations"
         element={
-          <ProtectedRoute role="LOGISTICS_STAFF" user={user}>
+          <ProtectedRoute role="LOGISTICS_STAFF" user={user} ready={ready}>
             <AdminShell>
               <Stations />
             </AdminShell>
@@ -246,7 +226,7 @@ function AppRoutes() {
       <Route
         path="/admin/routes"
         element={
-          <ProtectedRoute role="LOGISTICS_STAFF" user={user}>
+          <ProtectedRoute role="LOGISTICS_STAFF" user={user} ready={ready}>
             <AdminShell>
               <AdminRoutesPage />
             </AdminShell>
@@ -256,7 +236,7 @@ function AppRoutes() {
       <Route
         path="/admin/drivers"
         element={
-          <ProtectedRoute role="LOGISTICS_STAFF" user={user}>
+          <ProtectedRoute role="LOGISTICS_STAFF" user={user} ready={ready}>
             <AdminShell>
               <Drivers />
             </AdminShell>
@@ -266,7 +246,7 @@ function AppRoutes() {
       <Route
         path="/admin/reservations"
         element={
-          <ProtectedRoute role="LOGISTICS_STAFF" user={user}>
+          <ProtectedRoute role="LOGISTICS_STAFF" user={user} ready={ready}>
             <AdminShell>
               <AdminReservations />
             </AdminShell>
@@ -276,7 +256,7 @@ function AppRoutes() {
       <Route
         path="/admin/reports"
         element={
-          <ProtectedRoute role="LOGISTICS_STAFF" user={user}>
+          <ProtectedRoute role="LOGISTICS_STAFF" user={user} ready={ready}>
             <AdminShell>
               <Reports />
             </AdminShell>
@@ -286,7 +266,7 @@ function AppRoutes() {
       <Route
         path="/admin/announcements"
         element={
-          <ProtectedRoute role="LOGISTICS_STAFF" user={user}>
+          <ProtectedRoute role="LOGISTICS_STAFF" user={user} ready={ready}>
             <AdminShell>
               <Announcements />
             </AdminShell>
@@ -294,20 +274,21 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/admin/settings"
+        path="/admin/users"
         element={
-          <ProtectedRoute role="LOGISTICS_STAFF" user={user}>
+          <ProtectedRoute role="LOGISTICS_STAFF" user={user} ready={ready}>
             <AdminShell>
-              <AdminSettings />
+              <AdminUsers />
             </AdminShell>
           </ProtectedRoute>
         }
       />
+      <Route path="/admin/settings" element={<Navigate to="/admin/users" replace />} />
 
       <Route
         path="/driver"
         element={
-          <ProtectedRoute role="DRIVER" user={user}>
+          <ProtectedRoute role="DRIVER" user={user} ready={ready}>
             <ComingSoon />
           </ProtectedRoute>
         }

@@ -13,10 +13,6 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Arabic RTL layout */
-[data-lang="ar"] {
-  direction: rtl;
-}
 
 a {
   font-weight: 500;

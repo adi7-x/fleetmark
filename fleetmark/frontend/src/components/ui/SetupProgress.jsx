@@ -20,7 +20,11 @@ export default function SetupProgress({ currentStep, done }) {
   const { t } = useTranslation();
   const [dismissed, setDismissed] = React.useState(() => localStorage.getItem("fleetmark_setup_dismissed") === "true");
 
-  if (dismissed) return null;
+  // Once trips exist the setup is finished: stop nagging on every page.
+  if (dismissed || (currentStep === "trips" && done)) {
+    if (!dismissed) localStorage.setItem("fleetmark_setup_dismissed", "true");
+    return null;
+  }
 
   const STEPS = BASE_STEPS.map(s => ({
     ...s,

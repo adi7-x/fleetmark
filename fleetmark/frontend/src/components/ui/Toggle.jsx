@@ -1,11 +1,14 @@
 import React from "react";
 
-export default function Toggle({ checked, onChange }) {
+export default function Toggle({ checked, onChange, label }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
+      // The switch renders as a bare track+knob with no text of its own, so
+      // without this a screen reader announces it only as "switch".
+      aria-label={label}
       onClick={onChange}
       style={{
         position: "relative",
@@ -14,6 +17,7 @@ export default function Toggle({ checked, onChange }) {
         borderRadius: "999px",
         border: "1px solid var(--line)",
         background: checked ? "var(--blue-bg)" : "var(--surface2)",
+        flexShrink: 0,
         cursor: "pointer",
         transition: "background 0.2s ease",
       }}

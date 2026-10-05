@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useTranslation } from "../../context/TranslationContext";
-import { API_BASE } from "../../services/api";
+import { API_BASE, getAccessToken, authFetch } from "../../services/api";
+import { fmtDate } from "../../utils/datetime";
 const PRIORITY_COLORS = {
   urgent: "var(--red)",
   warning: "var(--amber, orange)",
@@ -13,31 +14,27 @@ const PRIORITY_ICONS = {
   info: "info",
 };
 
-function timeAgo(dateStr) {
+function timeAgo(dateStr, t) {
   if (!dateStr) return "";
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "Just now";
-  if (mins < 60) return `${mins}m ago`;
+  const mins = Math.floor((Date.now() - new Date(dateStr).getTime()) / 60000);
+  if (mins < 1) return t("justNow");
+  if (mins < 60) return t("minsAgo").replace("{{n}}", mins);
   const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  if (days === 1) return "Yesterday";
-  if (days < 7) return `${days}d ago`;
-  return new Date(dateStr).toLocaleDateString();
+  if (hrs < 24) return t("hoursAgo").replace("{{n}}", hrs);
+  return fmtDate(dateStr);
 }
 
 export default function Notifications() {
   const { t } = useTranslation();
   const [announcements, setAnnouncements] = useState([]);
   const [tab, setTab] = useState("all");
-  const token = localStorage.getItem("fleetmark_access");
+  const token = getAccessToken();
 
   async function load() {
     if (!token) return;
     try {
-      const res = await fetch(`${API_BASE}/announcements/`, {
-        headers: { Authorization: `Bearer ${token}`, "X-API-Key": import.meta.env.VITE_API_KEY }
+      const res = await authFetch(`${API_BASE}/announcements/`, {
+        headers: { Authorization: `Bearer ${token}` }
       });
       if (res.ok) {
         setAnnouncements(await res.json());
@@ -52,19 +49,18 @@ export default function Notifications() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Tell the layout to refresh its unread badge only after the server has
+  // recorded the dismissal — refreshing first re-fetched it as unread.
   async function dismiss(id) {
     setAnnouncements(prev => prev.map(a => a.id === id ? { ...a, is_dismissed: true } : a));
-    window.dispatchEvent(new CustomEvent("fleetmark:refresh"));
-    if (token) {
-      await fetch(`${API_BASE}/announcements/${id}/dismiss/`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "X-API-Key": import.meta.env.VITE_API_KEY }
-      }).catch(() => {});
-    }
+    await authFetch(`${API_BASE}/announcements/${id}/dismiss/`, { method: "POST" }).catch(() => {});
+    window.dispatchEvent(new CustomEvent("fleetmark:badge"));
   }
 
   const unread = announcements.filter((a) => !a.is_dismissed);
-  const urgent = announcements.filter((a) => a.priority === "urgent" && !a.is_dismissed);
+  // The Urgent tab lists every urgent notice (read ones included); its badge counts unread.
+  const urgent = announcements.filter((a) => a.priority === "urgent");
+  const urgentUnread = urgent.filter((a) => !a.is_dismissed).length;
 
   // Determine visible list based on tab
   let visible;
@@ -75,7 +71,7 @@ export default function Notifications() {
   const tabs = [
     { id: "all", label: t("notifAll"), count: announcements.length },
     { id: "unread", label: t("notifUnread"), count: unread.length },
-    { id: "urgent", label: t("notifUrgent"), count: urgent.length },
+    { id: "urgent", label: t("notifUrgent"), count: urgentUnread },
   ];
 
   const emptyMessages = {
@@ -88,15 +84,14 @@ export default function Notifications() {
     <div className="animate-in" style={{ display: "grid", gap: "var(--space-5)" }}>
       {/* ── Header + Tab bar ──────────────────── */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
-        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>{t("notifTitle")}</h1>
+        <span />
         {unread.length > 0 && tab !== "unread" && (
           <button
             type="button"
             onClick={async () => {
-              const pending = unread.map(u => fetch(`${API_BASE}/announcements/${u.id}/dismiss/`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "X-API-Key": import.meta.env.VITE_API_KEY } }).catch(()=>{}));
               setAnnouncements(prev => prev.map(a => ({ ...a, is_dismissed: true })));
-              window.dispatchEvent(new CustomEvent("fleetmark:refresh"));
-              await Promise.all(pending);
+              await Promise.all(unread.map(u => authFetch(`${API_BASE}/announcements/${u.id}/dismiss/`, { method: "POST" }).catch(() => {})));
+              window.dispatchEvent(new CustomEvent("fleetmark:badge"));
             }}
             style={{
               border: "none",
@@ -222,10 +217,10 @@ export default function Notifications() {
                             background: isRead ? "transparent" : `color-mix(in srgb, ${prColor} 10%, transparent)`,
                           }}
                         >
-                          {a.priority}
+                          {t(`priority_${a.priority}`)}
                         </span>
                         <span style={{ fontSize: 11, color: "var(--dim)" }}>
-                          {timeAgo(a.created_at)}
+                          {timeAgo(a.created_at, t)}
                         </span>
                       </div>
                       <h4 style={{ margin: "6px 0 0", fontSize: 15, fontWeight: 700 }}>{a.title}</h4>

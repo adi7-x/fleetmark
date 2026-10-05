@@ -4,10 +4,29 @@ import SkeletonTable from "../../components/ui/SkeletonTable";
 import SetupProgress from "../../components/ui/SetupProgress";
 import AdminEmptyState from "../../components/ui/AdminEmptyState";
 import useCountUp from "../../hooks/useCountUp";
-import { API_BASE } from "../../services/api";
+import { API_BASE, getAccessToken, authFetch, errorMessage } from "../../services/api";
+import { fmtTime, fmtDate } from "../../utils/datetime";
+import { useTranslation } from "../../context/TranslationContext";
 
 
 const emptyForm = { route: "", bus: "", driver: "", departure_datetime: "" };
+
+// <input type="datetime-local"> wants local wall-clock time. toISOString()
+// is UTC, which shifted every edited trip by the UTC offset (1h in Morocco).
+function toLocalInput(iso) {
+  const d = new Date(iso);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// Translation keys, resolved with t() at render.
+const STATUS_KEYS = {
+  scheduled: "statusScheduled",
+  near_full: "tripsNearFull",
+  full: "full",
+  departed: "statusDeparted",
+  archived: "tripsArchived",
+};
 
 /** Stat card with count-up — must be a separate component (rules of hooks). */
 function TripStatCard({ label, numericTarget, suffix, decimals = 0 }) {
@@ -45,13 +64,14 @@ function TripStatCard({ label, numericTarget, suffix, decimals = 0 }) {
 }
 
 export default function Trips() {
+  const { t } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();
   const [trips, setTrips] = useState([]);
   const [routes, setRoutes] = useState([]);
   const [buses, setBuses] = useState([]);
   const [drivers, setDrivers] = useState([]);
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("upcoming");
   const [routeFilter, setRouteFilter] = useState("all");
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -60,35 +80,36 @@ export default function Trips() {
   const [error, setError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [confirmArchive, setConfirmArchive] = useState(null);
+  const [confirmDeleteListed, setConfirmDeleteListed] = useState(false);
+  const [notice, setNotice] = useState("");
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkType, setBulkType] = useState("regular");
   const [bulkForm, setBulkForm] = useState({ start_date: "", end_date: "", dates: "", route: "", bus: "", driver: "", skip_weekends: true });
 
-  const token = localStorage.getItem("fleetmark_access");
+  const token = getAccessToken();
   const headers = useMemo(() => ({ 
     Authorization: `Bearer ${token}`, 
     "Content-Type": "application/json",
-    "X-API-Key": import.meta.env.VITE_API_KEY
   }), [token]);
 
   async function load() {
     setLoading(true);
     setError("");
     try {
-      const [t, r, b, d] = await Promise.all([
-        fetch(`${API_BASE}/trips/`, { headers }),
-        fetch(`${API_BASE}/routes/`, { headers }),
-        fetch(`${API_BASE}/buses/`, { headers }),
-        fetch(`${API_BASE}/drivers/`, { headers }),
+      const [tRes, r, b, d] = await Promise.all([
+        authFetch(`${API_BASE}/trips/`, { headers }),
+        authFetch(`${API_BASE}/routes/`, { headers }),
+        authFetch(`${API_BASE}/buses/`, { headers }),
+        authFetch(`${API_BASE}/drivers/`, { headers }),
       ]);
-      if (!t.ok || !r.ok || !b.ok || !d.ok) throw new Error("Failed to load trips.");
-      const [tData, rData, bData, dData] = await Promise.all([t.json(), r.json(), b.json(), d.json()]);
+      if (!tRes.ok || !r.ok || !b.ok || !d.ok) throw new Error(t("tripsLoadFailed"));
+      const [tData, rData, bData, dData] = await Promise.all([tRes.json(), r.json(), b.json(), d.json()]);
       setTrips(tData || []);
       setRoutes(rData || []);
       setBuses(bData || []);
       setDrivers(dData || []);
     } catch (err) {
-      setError(err.message || "Trip page load failed.");
+      setError(err.message || t("tripsLoadUnable"));
     } finally {
       setLoading(false);
     }
@@ -98,6 +119,12 @@ export default function Trips() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!notice) return undefined;
+    const id = setTimeout(() => setNotice(""), 4000);
+    return () => clearTimeout(id);
+  }, [notice]);
 
   useEffect(() => {
     if (location.state?.openTripForm) {
@@ -120,16 +147,17 @@ export default function Trips() {
 
   function getCountdown(departureStr) {
     const ms = new Date(departureStr) - new Date();
-    if (ms < 0) return "Departed";
+    if (ms < 0) return t("statusDeparted");
     const mins = Math.floor(ms / 60000);
     const h = Math.floor(mins / 60);
     const m = mins % 60;
-    if (h > 0) return `in ${h}h ${m}m`;
-    return `in ${m}m`;
+    if (h > 0) return t("tripsInHM").replace("{{h}}", h).replace("{{m}}", m);
+    return t("tripsInM").replace("{{m}}", m);
   }
 
   function getRowStatus(trip) {
     if (trip.archived_at) return "archived";
+    if (new Date(trip.departure_datetime) < new Date()) return "departed";
     const seatsLeft = Number(trip.seats_left ?? 0);
     const capacity = Number(trip.bus_seat_capacity || 0);
     if (seatsLeft <= 0) return "full";
@@ -146,7 +174,9 @@ export default function Trips() {
 
   const filtered = trips.filter((trip) => {
     const rowStatus = getRowStatus(trip);
-    if (statusFilter !== "all" && statusFilter !== rowStatus) return false;
+    if (statusFilter === "upcoming") {
+      if (rowStatus === "archived" || rowStatus === "departed") return false;
+    } else if (statusFilter !== "all" && statusFilter !== rowStatus) return false;
     if (routeFilter !== "all" && trip.route !== routeFilter) return false;
     return true;
   });
@@ -163,7 +193,7 @@ export default function Trips() {
       route: trip.route,
       bus: trip.bus,
       driver: trip.driver,
-      departure_datetime: new Date(trip.departure_datetime).toISOString().slice(0, 16),
+      departure_datetime: toLocalInput(trip.departure_datetime),
     });
     setOpen(true);
   }
@@ -176,8 +206,7 @@ export default function Trips() {
 
   function openGenerateWeekly() {
     const today = new Date();
-    const currentDay = today.getDay(); // 0 is Sunday, 1 is Monday
-    
+
     // Find current week's Monday (or most recent)
     const nextMonday = new Date(today);
     const day = today.getDay();
@@ -220,7 +249,7 @@ export default function Trips() {
       const maxDate = new Date(today);
       maxDate.setDate(today.getDate() + 15);
       if (eDate > maxDate) {
-        setError("You cannot generate trips further than 15 days from today.");
+        setError(t("tripsMax15Days"));
         setLoading(false);
         return;
       }
@@ -232,7 +261,7 @@ export default function Trips() {
 
       if (bulkType === "regular") {
         if (!bulkForm.start_date || !bulkForm.end_date) {
-          setError("Start and end dates are required.");
+          setError(t("tripsDatesRequired"));
           setLoading(false);
           return;
         }
@@ -246,7 +275,7 @@ export default function Trips() {
       } else {
         // specific dates
         if (!bulkForm.dates) {
-          setError("Please enter at least one date.");
+          setError(t("tripsEnterDate"));
           setLoading(false);
           return;
         }
@@ -258,7 +287,7 @@ export default function Trips() {
           const parsed = new Date(ds + "T00:00:00");
           if (isNaN(parsed.getTime())) continue;
           if (parsed > maxDate) {
-            setError("You cannot generate trips further than 15 days from today.");
+            setError(t("tripsMax15Days"));
             setLoading(false);
             return;
           }
@@ -267,7 +296,7 @@ export default function Trips() {
       }
 
       if (!datesToGenerate.length) {
-        setError("No valid dates in the selected range.");
+        setError(t("tripsNoValidDates"));
         setLoading(false);
         return;
       }
@@ -285,14 +314,14 @@ export default function Trips() {
       const busCb      = find(buses, "Coin Blue", "CoinBlue", "CB");
       const busUnified = find(buses, "Unified", "Night Route", "UNI");
 
-      const defaultDriver = drivers[0] || null;
+      const defaultDriver = drivers.find((d) => d.status === "active") || null;
 
       // Fallbacks: use first available if specific ones not found
       const fallbackRoute = routes[0];
       const fallbackBus   = buses[0];
 
-      if (!fallbackRoute || !fallbackBus) {
-        setError("You need at least 1 route and 1 bus before generating a schedule.");
+      if (!fallbackRoute || !fallbackBus || !defaultDriver) {
+        setError(t("tripsNeedResources"));
         setLoading(false);
         return;
       }
@@ -322,13 +351,13 @@ export default function Trips() {
             payloads.push({
               route:              (routeOcp || fallbackRoute).id,
               bus:                (busOcp   || fallbackBus).id,
-              driver:             defaultDriver?.id || "",
+              driver:             defaultDriver.id,
               departure_datetime: departureISO,
             });
             payloads.push({
               route:              (routeCb || routeUnified || fallbackRoute).id,
               bus:                (busCb   || busUnified   || fallbackBus).id,
-              driver:             defaultDriver?.id || "",
+              driver:             defaultDriver.id,
               departure_datetime: departureISO,
             });
           } else {
@@ -336,7 +365,7 @@ export default function Trips() {
             payloads.push({
               route:              (routeUnified || fallbackRoute).id,
               bus:                (busUnified   || fallbackBus).id,
-              driver:             defaultDriver?.id || "",
+              driver:             defaultDriver.id,
               departure_datetime: departureISO,
             });
           }
@@ -345,18 +374,19 @@ export default function Trips() {
 
       // ── 5. Deduplicate against existing trips ─────────────────
       const existingKeys = new Set(
-        trips.map((t) => `${t.route}|${t.departure_datetime}`)
+        // Compare instants: the API returns "+01:00" offsets, the payloads are UTC "Z".
+        trips.map((t) => `${t.route}|${new Date(t.departure_datetime).getTime()}`)
       );
 
       const newPayloads = payloads.filter((p) => {
-        const key = `${p.route}|${p.departure_datetime}`;
+        const key = `${p.route}|${new Date(p.departure_datetime).getTime()}`;
         if (existingKeys.has(key)) return false;
         existingKeys.add(key);   // also deduplicate within the batch
         return true;
       });
 
       if (!newPayloads.length) {
-        setError("All trips for this range already exist — nothing new to generate.");
+        setError(t("tripsAllExist"));
         setLoading(false);
         return;
       }
@@ -368,7 +398,7 @@ export default function Trips() {
         const batch = newPayloads.slice(i, i + BATCH);
         const results = await Promise.allSettled(
           batch.map((p) =>
-            fetch(`${API_BASE}/trips/`, {
+            authFetch(`${API_BASE}/trips/`, {
               method: "POST",
               headers,
               body: JSON.stringify(p),
@@ -380,69 +410,78 @@ export default function Trips() {
 
       setBulkOpen(false);
       await load();
-      // brief success feedback via the error state (green-ish in the UI)
-      if (created > 0) setError("");
+      const failed = newPayloads.length - created;
+      setNotice(created === 1 ? t("tripsGeneratedOne") : t("tripsGeneratedMany").replace("{{n}}", created));
+      if (failed > 0) setError(failed === 1 ? t("tripsFailedOne") : t("tripsFailedMany").replace("{{n}}", failed));
     } catch (err) {
-      setError(err.message || "Schedule generation failed.");
+      setError(err.message || t("tripsGenFailed"));
       setLoading(false);
     }
   }
 
   async function save() {
+    setError("");
+    if (!form.route || !form.bus || !form.driver || !form.departure_datetime) {
+      setError(t("tripsFieldsRequired"));
+      return;
+    }
     try {
       const payload = { ...form, departure_datetime: new Date(form.departure_datetime).toISOString() };
       const endpoint = editing ? `${API_BASE}/trips/${editing.id}/` : `${API_BASE}/trips/`;
       const method = editing ? "PUT" : "POST";
-      const res = await fetch(endpoint, { method, headers, body: JSON.stringify(payload) });
-      if (!res.ok) throw new Error("Save failed.");
+      const res = await authFetch(endpoint, { method, headers, body: JSON.stringify(payload) });
+      if (!res.ok) throw new Error(await errorMessage(res, t("saveFailed")));
       setOpen(false);
+      setNotice(editing ? t("tripsUpdated") : t("tripsCreated"));
       await load();
     } catch (err) {
-      setError(err.message || "Save failed.");
+      setError(err.message || t("saveFailed"));
     }
   }
 
-  async function deleteAll() {
-    if (!window.confirm("⚠️ DANGER: Are you entirely sure you want to DELETE ALL trips from the system? This will wipe the active transit registry!")) return;
-    setLoading(true);
+  // The backend refuses an unscoped wipe, so delete exactly the trips the
+  // admin is looking at (current filters) and nothing else.
+  async function deleteListed() {
+    setConfirmDeleteListed(false);
     setError("");
     try {
-      const res = await fetch(`${API_BASE}/trips/bulk-delete/`, { method: "DELETE", headers });
-      if (!res.ok) throw new Error("Delete all failed.");
+      const res = await authFetch(`${API_BASE}/trips/bulk-delete/`, {
+        method: "DELETE",
+        headers,
+        body: JSON.stringify({ confirm: true, ids: filtered.map((t) => t.id) }),
+      });
+      if (!res.ok) throw new Error(await errorMessage(res, t("itemDeleteFailed")));
+      const data = await res.json().catch(() => ({}));
+      setNotice(data.detail || t("tripsDeleted"));
       await load();
     } catch (err) {
-      setError(err.message || "Delete all failed.");
-      setLoading(false);
+      setError(err.message || t("itemDeleteFailed"));
     }
   }
 
   async function archive(trip) {
     try {
-      const res = await fetch(`${API_BASE}/trips/${trip.id}/`, {
-        method: "PUT",
+      const res = await authFetch(`${API_BASE}/trips/${trip.id}/`, {
+        method: "PATCH",
         headers,
-        body: JSON.stringify({
-          route: trip.route,
-          bus: trip.bus,
-          driver: trip.driver,
-          departure_datetime: trip.departure_datetime,
-          archived_at: new Date().toISOString(),
-        }),
+        body: JSON.stringify({ archived_at: new Date().toISOString() }),
       });
-      if (!res.ok) throw new Error("Archive failed.");
+      if (!res.ok) throw new Error(await errorMessage(res, t("tripsArchiveFailed")));
+      setNotice(t("tripsArchivedNotice"));
       await load();
     } catch (err) {
-      setError(err.message || "Archive failed.");
+      setError(err.message || t("tripsArchiveFailed"));
     }
   }
 
   async function remove(id) {
     try {
-      const res = await fetch(`${API_BASE}/trips/${id}/`, { method: "DELETE", headers });
-      if (!res.ok) throw new Error("Delete failed.");
+      const res = await authFetch(`${API_BASE}/trips/${id}/`, { method: "DELETE", headers });
+      if (!res.ok) throw new Error(await errorMessage(res, t("itemDeleteFailed")));
+      setNotice(t("tripsDeletedOne"));
       await load();
     } catch (err) {
-      setError(err.message || "Delete failed.");
+      setError(err.message || t("itemDeleteFailed"));
     }
   }
 
@@ -453,25 +492,26 @@ export default function Trips() {
   );
 
   return (
-    <div className="animate-in" style={{ position: "relative", display: "grid", gap: 26 }}>
+    <div className="animate-in" style={{ position: "relative", display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 26 }}>
       <SetupProgress currentStep="trips" done={trips.filter(t => !t.archived_at).length > 0} />
       <style>{`
-        .trip-row .row-actions { opacity: 0; transition: opacity 0.2s; }
-        .trip-row:hover .row-actions { opacity: 1; }
+        .trip-row .row-actions { opacity: 0.35; transition: opacity 0.2s; }
+        .trip-row:hover .row-actions, .trip-row:focus-within .row-actions { opacity: 1; }
       `}</style>
       <div className="animate-in" style={{ marginBottom: 6, display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 16 }}>
         <div>
           <span className="mono" style={{ color: "var(--blue)", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.2em", fontWeight: 700 }}>
-            System Registry
+            {t("tripsEyebrow")}
           </span>
-          <h2 style={{ margin: "8px 0 0", fontSize: 42, lineHeight: 1.1, letterSpacing: "-0.03em" }}>
-            Active Transit Shuttles
+          <h2 style={{ margin: "8px 0 0", fontSize: 32, lineHeight: 1.1, letterSpacing: "-0.03em" }}>
+            {t("navTrips")}
           </h2>
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
           <button
             type="button"
-            onClick={deleteAll}
+            onClick={() => setConfirmDeleteListed(true)}
+            disabled={!filtered.length}
             style={{
               display: "inline-flex",
               alignItems: "center",
@@ -482,7 +522,8 @@ export default function Trips() {
               borderRadius: 10,
               padding: "12px 20px",
               fontWeight: 700,
-              cursor: "pointer",
+              cursor: filtered.length ? "pointer" : "not-allowed",
+              opacity: filtered.length ? 1 : 0.5,
               fontSize: 14,
               boxShadow: "var(--shadow-sm)",
               transition: "transform 0.15s ease",
@@ -492,7 +533,7 @@ export default function Trips() {
             onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
           >
             <span className="material-symbols-outlined" style={{ fontSize: 20 }}>delete_sweep</span>
-            Delete All
+            {t("tripsDeleteListed").replace("{{n}}", filtered.length)}
           </button>
           <button
             type="button"
@@ -517,7 +558,7 @@ export default function Trips() {
             onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
           >
             <span className="material-symbols-outlined" style={{ fontSize: 20 }}>date_range</span>
-            Weekly Mon-Sun
+            {t("tripsWeekly")}
           </button>
           <button
             type="button"
@@ -542,7 +583,7 @@ export default function Trips() {
             onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
           >
             <span className="material-symbols-outlined" style={{ fontSize: 20 }}>event</span>
-            Custom Dates
+            {t("tripsCustomDates")}
           </button>
           <button
             type="button"
@@ -567,18 +608,20 @@ export default function Trips() {
             onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
           >
             <span className="material-symbols-outlined" style={{ fontSize: 20, fontVariationSettings: "'FILL' 1" }}>add_box</span>
-            New Trip
+            {t("navNewTrip")}
           </button>
         </div>
       </div>
 
       <div className="animate-in" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, padding: "14px 0", borderTop: "1px solid color-mix(in srgb, var(--line) 30%, transparent)", borderBottom: "1px solid color-mix(in srgb, var(--line) 30%, transparent)" }}>
-        <div style={{ display: "flex", alignItems: "center", background: "var(--surface)", padding: 4, borderRadius: 8 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", background: "var(--surface)", padding: 4, borderRadius: 8 }}>
           {[
-            ["all", "All"],
-            ["scheduled", "Scheduled"],
-            ["full", "Full"],
-            ["near_full", "Near Full"],
+            ["upcoming", "tabUpcoming"],
+            ["near_full", "tripsNearFull"],
+            ["full", "full"],
+            ["departed", "statusDeparted"],
+            ["archived", "tripsArchived"],
+            ["all", "filterAll"],
           ].map(([value, label]) => (
             <button
               key={value}
@@ -597,17 +640,17 @@ export default function Trips() {
                 cursor: "pointer",
               }}
             >
-              {label}
+              {t(label)}
             </button>
           ))}
         </div>
         <div style={{ width: 1, height: 24, background: "color-mix(in srgb, var(--line) 40%, transparent)" }} />
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span className="mono" style={{ fontSize: 10, textTransform: "uppercase", color: "var(--mid)", letterSpacing: "0.12em" }}>
-            Route:
+            {t("tripsRouteFilter")}
           </span>
           <select value={routeFilter} onChange={(e) => setRouteFilter(e.target.value)} style={{ background: "var(--surface)", color: "var(--ink)", border: "1px solid color-mix(in srgb, var(--line) 30%, transparent)", borderRadius: 6, padding: "7px 10px" }}>
-            <option value="all">All routes</option>
+            <option value="all">{t("tripsAllRoutes")}</option>
             {routes.map((route) => (
               <option key={route.id} value={route.id}>
                 {route.name}
@@ -616,7 +659,17 @@ export default function Trips() {
           </select>
         </div>
       </div>
-      {error ? <p style={{ color: "var(--red)", margin: 0 }}>{error}</p> : null}
+      {notice ? (
+        <p role="status" style={{ color: "var(--green)", margin: 0, display: "flex", alignItems: "center", gap: 6 }}>
+          <span className="material-symbols-outlined" style={{ fontSize: 18 }}>check_circle</span>
+          {notice}
+        </p>
+      ) : null}
+      {error ? <p role="alert" style={{ color: "var(--red)", margin: 0 }}>{error}</p> : null}
+
+      {trips.length > 0 && !filtered.length ? (
+        <p style={{ color: "var(--mid)", margin: 0 }}>{t("tripsNoMatch")}</p>
+      ) : null}
 
       {!filtered.length && trips.length === 0 ? (
         <AdminEmptyState variant="trips" onAction={openCreate} />
@@ -626,12 +679,12 @@ export default function Trips() {
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ textAlign: "left", borderBottom: "1px solid color-mix(in srgb, var(--line) 30%, transparent)" }}>
-              <th scope="col" style={{ padding: "14px 16px", fontSize: 10, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.14em" }}>Departure</th>
-              <th scope="col" style={{ padding: "14px 16px", fontSize: 10, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.14em" }}>Route</th>
-              <th scope="col" style={{ padding: "14px 16px", fontSize: 10, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.14em" }}>Bus & Driver</th>
-              <th scope="col" style={{ padding: "14px 16px", fontSize: 10, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.14em" }}>Capacity</th>
-              <th scope="col" style={{ padding: "14px 16px", fontSize: 10, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.14em" }}>Status</th>
-              <th scope="col" style={{ padding: "14px 16px", fontSize: 10, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.14em", textAlign: "right" }}>Actions</th>
+              <th scope="col" style={{ padding: "14px 16px", fontSize: 10, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.14em" }}>{t("colDeparture")}</th>
+              <th scope="col" style={{ padding: "14px 16px", fontSize: 10, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.14em" }}>{t("colRoute")}</th>
+              <th scope="col" style={{ padding: "14px 16px", fontSize: 10, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.14em" }}>{t("colBusDriver")}</th>
+              <th scope="col" style={{ padding: "14px 16px", fontSize: 10, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.14em" }}>{t("colCapacity")}</th>
+              <th scope="col" style={{ padding: "14px 16px", fontSize: 10, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.14em" }}>{t("colStatus")}</th>
+              <th scope="col" style={{ padding: "14px 16px", fontSize: 10, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.14em", textAlign: "right" }}>{t("colActions")}</th>
             </tr>
           </thead>
           <tbody>
@@ -648,20 +701,20 @@ export default function Trips() {
                   <td style={{ padding: "12px 16px" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <div className="mono" style={{ color: "var(--blue)", fontSize: 14 }}>
-                        {new Date(trip.departure_datetime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        {fmtTime(trip.departure_datetime)}
                       </div>
                       <div className="mono" style={{ fontSize: 10, padding: "2px 6px", borderRadius: 4, background: "var(--surface2)", color: "var(--ink2)", fontWeight: 700 }}>
                         {getCountdown(trip.departure_datetime)}
                       </div>
                     </div>
                     <div className="mono" style={{ fontSize: 10, color: "var(--dim)", textTransform: "uppercase", marginTop: 4 }}>
-                      {new Date(trip.departure_datetime).toLocaleDateString()}
+                      {fmtDate(trip.departure_datetime)}
                     </div>
                   </td>
                   <td style={{ padding: "12px 16px" }}>
                     <div style={{ fontSize: 14, fontWeight: 700 }}>{trip.route_name || trip.route}</div>
-                    <div className="mono" style={{ fontSize: 10, color: "var(--mid)", textTransform: "uppercase" }}>
-                      {String(trip.id ?? "").slice(0, 8)}
+                    <div style={{ fontSize: 11, color: "var(--mid)" }}>
+                      {trip.route_stops?.length ? t("stopsCount").replace("{{n}}", trip.route_stops.length) : ""}
                     </div>
                   </td>
                   <td style={{ padding: "12px 16px", verticalAlign: "top" }}>
@@ -670,7 +723,7 @@ export default function Trips() {
                         {b?.name || trip.bus_name || "—"}
                       </div>
                       <div style={{ fontSize: 12, color: "var(--mid)", lineHeight: 1.35 }}>
-                        <span style={{ opacity: 0.75 }}>Driver</span>{" "}
+                        <span style={{ opacity: 0.75 }}>{t("roleDriver")}</span>{" "}
                         <span style={{ fontWeight: 600, color: "var(--ink2)" }}>{d?.name || trip.driver_name || "—"}</span>
                       </div>
                     </div>
@@ -719,20 +772,20 @@ export default function Trips() {
                             : "var(--blue)",
                       }}
                     >
-                      {rowStatus === "near_full" ? "NEAR_FULL" : rowStatus.toUpperCase()}
+                      {t(STATUS_KEYS[rowStatus])}
                     </span>
                   </td>
                   <td style={{ padding: "12px 16px", textAlign: "right" }}>
                     <div className="row-actions" style={{ display: "inline-flex", gap: 6 }}>
-                      <button type="button" onClick={() => openEdit(trip)} style={{ border: "none", background: "transparent", color: "var(--mid)", cursor: "pointer" }}>
+                      <button type="button" aria-label={t("tripsEditAria")} title={t("edit")} onClick={() => openEdit(trip)} style={{ border: "none", background: "transparent", color: "var(--mid)", cursor: "pointer" }}>
                         <span className="material-symbols-outlined" style={{ fontSize: 18 }}>edit</span>
                       </button>
-                      {!trip.archived_at ? (
-                        <button type="button" onClick={() => setConfirmArchive(trip)} style={{ border: "none", background: "transparent", color: "var(--mid)", cursor: "pointer" }}>
+                      {!trip.archived_at && new Date(trip.departure_datetime) < new Date() ? (
+                        <button type="button" aria-label={t("tripsArchiveAria")} title={t("archive")} onClick={() => setConfirmArchive(trip)} style={{ border: "none", background: "transparent", color: "var(--mid)", cursor: "pointer" }}>
                           <span className="material-symbols-outlined" style={{ fontSize: 18 }}>package_2</span>
                         </button>
                       ) : null}
-                      <button type="button" onClick={() => setConfirmDelete(trip)} style={{ border: "none", background: "transparent", color: "var(--red)", cursor: "pointer" }}>
+                      <button type="button" aria-label={t("tripsDeleteAria")} title={t("delete")} onClick={() => setConfirmDelete(trip)} style={{ border: "none", background: "transparent", color: "var(--red)", cursor: "pointer" }}>
                         <span className="material-symbols-outlined" style={{ fontSize: 18 }}>delete</span>
                       </button>
                     </div>
@@ -758,7 +811,7 @@ export default function Trips() {
                 <div>
                   <div style={{ fontSize: 15, fontWeight: 700 }}>{trip.route_name || trip.route}</div>
                   <div className="mono" style={{ color: "var(--blue)", fontSize: 13, marginTop: 4 }}>
-                    {new Date(trip.departure_datetime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    {fmtTime(trip.departure_datetime)}
                   </div>
                 </div>
                 <span
@@ -768,25 +821,25 @@ export default function Trips() {
                   background: rowStatus === "full" || rowStatus === "near_full" ? "var(--red-bg)" : "var(--blue-light)",
                   color: rowStatus === "full" || rowStatus === "near_full" ? "var(--red)" : "var(--blue)" }}
                 >
-                  {rowStatus}
+                  {t(STATUS_KEYS[rowStatus])}
                 </span>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, fontSize: 13, background: "var(--surface2)", padding: 12, borderRadius: 8 }}>
                 <div>
-                  <span style={{ color: "var(--mid)", display: "block", fontSize: 10, textTransform: "uppercase", fontWeight: 700 }}>Bus</span>
+                  <span style={{ color: "var(--mid)", display: "block", fontSize: 10, textTransform: "uppercase", fontWeight: 700 }}>{t("bus")}</span>
                   {b?.name || trip.bus_name || "—"}
                 </div>
                 <div>
-                  <span style={{ color: "var(--mid)", display: "block", fontSize: 10, textTransform: "uppercase", fontWeight: 700 }}>Capacity</span>
+                  <span style={{ color: "var(--mid)", display: "block", fontSize: 10, textTransform: "uppercase", fontWeight: 700 }}>{t("colCapacity")}</span>
                   {cap > 0 ? `${used} / ${cap}` : "—"}
                 </div>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid var(--border)", paddingTop: 12, marginTop: 4 }}>
-                <div style={{ fontSize: 12, color: "var(--mid)" }}>{d?.name || trip.driver_name || "No driver"}</div>
+                <div style={{ fontSize: 12, color: "var(--mid)" }}>{d?.name || trip.driver_name || t("tripsNoDriver")}</div>
                 <div style={{ display: "flex", gap: 12 }}>
-                  <span className="material-symbols-outlined" onClick={() => openEdit(trip)} style={{ fontSize: 18, color: "var(--mid)", cursor: "pointer" }}>edit</span>
-                  {!trip.archived_at && <span className="material-symbols-outlined" onClick={() => setConfirmArchive(trip)} style={{ fontSize: 18, color: "var(--mid)", cursor: "pointer" }}>package_2</span>}
-                  <span className="material-symbols-outlined" onClick={() => setConfirmDelete(trip)} style={{ fontSize: 18, color: "var(--red)", cursor: "pointer" }}>delete</span>
+                  <button type="button" aria-label={t("tripsEditAria")} onClick={() => openEdit(trip)} className="material-symbols-outlined" style={{ fontSize: 18, color: "var(--mid)", cursor: "pointer", border: "none", background: "transparent", padding: 4 }}>edit</button>
+                  {!trip.archived_at && new Date(trip.departure_datetime) < new Date() && <button type="button" aria-label={t("tripsArchiveAria")} onClick={() => setConfirmArchive(trip)} className="material-symbols-outlined" style={{ fontSize: 18, color: "var(--mid)", cursor: "pointer", border: "none", background: "transparent", padding: 4 }}>package_2</button>}
+                  <button type="button" aria-label={t("tripsDeleteAria")} onClick={() => setConfirmDelete(trip)} className="material-symbols-outlined" style={{ fontSize: 18, color: "var(--red)", cursor: "pointer", border: "none", background: "transparent", padding: 4 }}>delete</button>
                 </div>
               </div>
             </div>
@@ -798,7 +851,7 @@ export default function Trips() {
 
       <section className="animate-in" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 16, marginTop: 16 }}>
         {(() => {
-          const activeTrips = trips.filter((t) => !t.archived_at);
+          const activeTrips = trips.filter((t) => !t.archived_at && new Date(t.departure_datetime) >= new Date());
           const totalCap = activeTrips.reduce((sum, t) => sum + capacityForTrip(t), 0);
           const totalUsed = activeTrips.reduce((sum, t) => {
             const cap = capacityForTrip(t);
@@ -808,10 +861,10 @@ export default function Trips() {
           const utilNum = totalCap > 0 ? Math.round((totalUsed / totalCap) * 100) : null;
           const totalReserved = totalUsed;
           return [
-            { label: "Fleet Utilization", numericTarget: utilNum, suffix: totalCap > 0 ? "%" : "", decimals: 0 },
-            { label: "Booked Seats", numericTarget: totalReserved, suffix: "active", decimals: 0 },
-            { label: "Drivers", numericTarget: drivers.length, suffix: "registered", decimals: 0 },
-            { label: "Active Trips", numericTarget: activeTrips.length, suffix: "tonight", decimals: 0 },
+            { label: t("tripsStatUtil"), numericTarget: utilNum, suffix: totalCap > 0 ? "%" : "", decimals: 0 },
+            { label: t("tripsStatBooked"), numericTarget: totalReserved, suffix: t("tripsSufUpcoming"), decimals: 0 },
+            { label: t("navDrivers"), numericTarget: drivers.length, suffix: t("tripsSufRegistered"), decimals: 0 },
+            { label: t("tripsStatUpcoming"), numericTarget: activeTrips.length, suffix: t("tripsSufScheduled"), decimals: 0 },
           ];
         })().map((item) => (
           <TripStatCard key={item.label} label={item.label} numericTarget={item.numericTarget} suffix={item.suffix} decimals={item.decimals} />
@@ -819,23 +872,23 @@ export default function Trips() {
       </section>
 
       {bulkOpen ? (
-        <div className="modal-backdrop-anim" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "grid", placeItems: "center", zIndex: 20 }}>
-          <div style={{ width: "min(520px,92vw)", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-md)", padding: "var(--space-6)", display: "grid", gap: "var(--space-3)" }}>
-            <h3 style={{ margin: 0 }}>{bulkType === "regular" ? "Generate Schedule" : "Generate Specific Events"}</h3>
+        <div className="modal-backdrop-anim" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "grid", placeItems: "center", zIndex: 1000 }}>
+          <div role="dialog" aria-modal="true" style={{ width: "min(520px,92vw)", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-md)", padding: "var(--space-6)", display: "grid", gap: "var(--space-3)" }}>
+            <h3 style={{ margin: 0 }}>{bulkType === "regular" ? t("tripsGenSchedule") : t("tripsGenSpecific")}</h3>
             <p style={{ margin: 0, color: "var(--mid)", fontSize: 13, lineHeight: 1.4 }}>
               {bulkType === "regular" 
-                ? "Generate night shift shuttles for the selected date range. 02:00 is automatically disabled."
-                : "Generate shuttles on specific exact dates. Type target dates separated by commas (ex. 2024-12-25, 2024-12-31)."}
+                ? t("tripsGenRangeDesc")
+                : t("tripsGenDatesDesc")}
             </p>
 
             <div style={{ background: "color-mix(in srgb, var(--blue) 8%, transparent)", border: "1px solid color-mix(in srgb, var(--blue) 30%, transparent)", borderRadius: 8, padding: 12, display: "grid", gap: 6 }}>
               <strong style={{ fontSize: 12, color: "var(--blue)", display: "flex", alignItems: "center", gap: 6 }}>
                 <span className="material-symbols-outlined" style={{ fontSize: 14 }}>info</span>
-                Automatic Routing Applied
+                {t("tripsAutoRouting")}
               </strong>
               <p style={{ margin: 0, fontSize: 12, color: "var(--mid)" }}>
-                <strong>Peak Hours (21:00, 22:00, 01:00):</strong> Generates 2 trips (OCP Route + Coin Blue Route).<br/>
-                <strong>Normal Hours:</strong> Generates 1 trip (Unified Night Route).
+                <strong>{t("tripsPeakLabel")}</strong> {t("tripsPeakDesc")}<br/>
+                <strong>{t("tripsNormalLabel")}</strong> {t("tripsNormalDesc")}
               </p>
             </div>
 
@@ -843,23 +896,23 @@ export default function Trips() {
               <>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                   <div>
-                    <label style={{ display: "block", fontSize: 12, marginBottom: 4 }}>Start Date</label>
+                    <label style={{ display: "block", fontSize: 12, marginBottom: 4 }}>{t("tripsStartDate")}</label>
                     <input type="date" value={bulkForm.start_date} onChange={(e) => setBulkForm((p) => ({ ...p, start_date: e.target.value }))} style={{ width: "100%", boxSizing: "border-box", background: "var(--surface2)", color: "var(--ink)", border: "1px solid var(--line)", borderRadius: 8, padding: 10 }} />
                   </div>
                   <div>
-                    <label style={{ display: "block", fontSize: 12, marginBottom: 4 }}>End Date</label>
+                    <label style={{ display: "block", fontSize: 12, marginBottom: 4 }}>{t("tripsEndDate")}</label>
                     <input type="date" value={bulkForm.end_date} onChange={(e) => setBulkForm((p) => ({ ...p, end_date: e.target.value }))} style={{ width: "100%", boxSizing: "border-box", background: "var(--surface2)", color: "var(--ink)", border: "1px solid var(--line)", borderRadius: 8, padding: 10 }} />
                   </div>
                 </div>
                 <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer", marginTop: 4 }}>
                   <input type="checkbox" checked={bulkForm.skip_weekends} onChange={(e) => setBulkForm((p) => ({ ...p, skip_weekends: e.target.checked }))} />
-                  <span>Skip Weekends (Saturday & Sunday)</span>
+                  <span>{t("tripsSkipWeekends")}</span>
                 </label>
               </>
             ) : (
               <div>
-                <label style={{ display: "block", fontSize: 12, marginBottom: 4 }}>Specific Dates (comma-separated YYYY-MM-DD)</label>
-                <input type="text" placeholder="e.g. 2024-12-25, 2024-12-31" value={bulkForm.dates} onChange={(e) => setBulkForm((p) => ({ ...p, dates: e.target.value }))} style={{ width: "100%", boxSizing: "border-box", background: "var(--surface2)", color: "var(--ink)", border: "1px solid var(--line)", borderRadius: 8, padding: 10 }} />
+                <label style={{ display: "block", fontSize: 12, marginBottom: 4 }}>{t("tripsSpecificDates")}</label>
+                <input type="text" placeholder={t("tripsDatesPlaceholder")} value={bulkForm.dates} onChange={(e) => setBulkForm((p) => ({ ...p, dates: e.target.value }))} style={{ width: "100%", boxSizing: "border-box", background: "var(--surface2)", color: "var(--ink)", border: "1px solid var(--line)", borderRadius: 8, padding: 10 }} />
               </div>
             )}
 
@@ -867,10 +920,10 @@ export default function Trips() {
 
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 10 }}>
               <button type="button" onClick={() => setBulkOpen(false)} style={{ border: "1px solid var(--line)", background: "var(--surface2)", color: "var(--ink)", borderRadius: 8, padding: "9px 12px", cursor: "pointer" }}>
-                Cancel
+                {t("cancel")}
               </button>
               <button type="button" onClick={saveBulk} disabled={loading} style={{ border: "1px solid var(--blue-bdr)", background: "var(--blue-bg)", color: "var(--blue)", borderRadius: 8, padding: "9px 12px", fontWeight: 700, cursor: loading ? "not-allowed" : "pointer", opacity: loading ? 0.7 : 1 }}>
-                {loading ? "Generating..." : "Generate Schedule"}
+                {loading ? t("tripsGenerating") : t("tripsGenSchedule")}
               </button>
             </div>
           </div>
@@ -878,40 +931,53 @@ export default function Trips() {
       ) : null}
 
       {open ? (
-        <div className="modal-backdrop-anim" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "grid", placeItems: "center", zIndex: 20 }}>
-          <div style={{ width: "min(520px,92vw)", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-md)", padding: "var(--space-6)", display: "grid", gap: "var(--space-3)" }}>
-            <h3 style={{ margin: 0 }}>{editing ? "Edit trip" : "Create trip"}</h3>
+        <div className="modal-backdrop-anim" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "grid", placeItems: "center", zIndex: 1000 }}>
+          <div role="dialog" aria-modal="true" style={{ width: "min(520px,92vw)", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-md)", padding: "var(--space-6)", display: "grid", gap: "var(--space-3)" }}>
+            <h3 style={{ margin: 0 }}>{editing ? t("tripsEditAria") : t("tripsCreate")}</h3>
+            <label style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--mid)", fontWeight: 600 }}>
+            {t("colRoute")}
             <select value={form.route} onChange={(e) => setForm((p) => ({ ...p, route: e.target.value }))} style={{ background: "var(--surface2)", color: "var(--ink)", border: "1px solid var(--line)", borderRadius: 8, padding: 10 }}>
-              <option value="">Route</option>
+              <option value="">{t("tripsSelectRoute")}</option>
               {routes.map((route) => (
                 <option key={route.id} value={route.id}>
                   {route.name}
                 </option>
               ))}
             </select>
+            </label>
+            <label style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--mid)", fontWeight: 600 }}>
+            {t("bus")}
             <select value={form.bus} onChange={(e) => setForm((p) => ({ ...p, bus: e.target.value }))} style={{ background: "var(--surface2)", color: "var(--ink)", border: "1px solid var(--line)", borderRadius: 8, padding: 10 }}>
-              <option value="">Bus</option>
+              <option value="">{t("tripsSelectBus")}</option>
               {buses.map((bus) => (
                 <option key={bus.id} value={bus.id}>
                   {bus.name} ({bus.plate})
                 </option>
               ))}
             </select>
+            </label>
+            <label style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--mid)", fontWeight: 600 }}>
+            {t("roleDriver")}
             <select value={form.driver} onChange={(e) => setForm((p) => ({ ...p, driver: e.target.value }))} style={{ background: "var(--surface2)", color: "var(--ink)", border: "1px solid var(--line)", borderRadius: 8, padding: 10 }}>
-              <option value="">Driver</option>
+              <option value="">{t("tripsSelectDriver")}</option>
               {drivers.map((driver) => (
-                <option key={driver.id} value={driver.id}>
-                  {driver.name}
+                <option key={driver.id} value={driver.id} disabled={driver.status !== "active"}>
+                  {driver.name}{driver.status !== "active" ? ` ${t("tripsDriverInactive")}` : ""}
                 </option>
               ))}
             </select>
+            </label>
+            <label style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--mid)", fontWeight: 600 }}>
+            {t("tripsDepartureLabel")}
             <input type="datetime-local" value={form.departure_datetime} onChange={(e) => setForm((p) => ({ ...p, departure_datetime: e.target.value }))} style={{ background: "var(--surface2)", color: "var(--ink)", border: "1px solid var(--line)", borderRadius: 8, padding: 10 }} />
+            </label>
+            {error ? <p role="alert" style={{ color: "var(--red)", fontSize: 13, margin: 0 }}>{error}</p> : null}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-              <button type="button" onClick={() => setOpen(false)} style={{ border: "1px solid var(--line)", background: "var(--surface2)", color: "var(--ink)", borderRadius: 8, padding: "9px 12px" }}>
-                Cancel
+              <button type="button" onClick={() => { setOpen(false); setError(""); }} style={{ border: "1px solid var(--line)", background: "var(--surface2)", color: "var(--ink)", borderRadius: 8, padding: "9px 12px", cursor: "pointer" }}>
+                {t("cancel")}
               </button>
-              <button type="button" onClick={save} style={{ border: "1px solid var(--blue-bdr)", background: "var(--blue-bg)", color: "var(--blue)", borderRadius: 8, padding: "9px 12px", fontWeight: 700 }}>
-                Save
+              <button type="button" onClick={save} style={{ border: "1px solid var(--blue-bdr)", background: "var(--blue-bg)", color: "var(--blue)", borderRadius: 8, padding: "9px 12px", fontWeight: 700, cursor: "pointer" }}>
+                {t("save")}
               </button>
             </div>
           </div>
@@ -920,18 +986,37 @@ export default function Trips() {
 
       {/* Delete Confirmation Modal */}
       {confirmDelete ? (
-        <div className="modal-backdrop-anim" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "grid", placeItems: "center", zIndex: 30 }}>
-          <div style={{ width: "min(420px,90vw)", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-md)", padding: "var(--space-6)", display: "grid", gap: "var(--space-4)" }}>
-            <h3 style={{ margin: 0 }}>Delete Trip</h3>
+        <div className="modal-backdrop-anim" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "grid", placeItems: "center", zIndex: 1000 }}>
+          <div role="dialog" aria-modal="true" style={{ width: "min(420px,90vw)", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-md)", padding: "var(--space-6)", display: "grid", gap: "var(--space-4)" }}>
+            <h3 style={{ margin: 0 }}>{t("tripsDeleteTitle")}</h3>
             <p style={{ margin: 0, color: "var(--mid)" }}>
-              Are you sure you want to delete this trip? All reservations for it will be cancelled. This action cannot be undone.
+              {t("tripsDeleteBody")}
             </p>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
               <button type="button" onClick={() => setConfirmDelete(null)} style={{ border: "1px solid var(--line)", background: "var(--surface2)", color: "var(--ink)", borderRadius: 8, padding: "9px 12px", cursor: "pointer" }}>
-                Cancel
+                {t("cancel")}
               </button>
               <button type="button" onClick={() => { remove(confirmDelete.id); setConfirmDelete(null); }} style={{ border: "1px solid color-mix(in srgb, var(--red) 40%, transparent)", background: "var(--red-bg)", color: "var(--red)", borderRadius: 8, padding: "9px 12px", fontWeight: 700, cursor: "pointer" }}>
-                Delete
+                {t("delete")}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {confirmDeleteListed ? (
+        <div className="modal-backdrop-anim" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "grid", placeItems: "center", zIndex: 1000 }}>
+          <div role="dialog" aria-modal="true" aria-labelledby="del-listed-title" style={{ width: "min(420px,90vw)", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-md)", padding: "var(--space-6)", display: "grid", gap: "var(--space-4)" }}>
+            <h3 id="del-listed-title" style={{ margin: 0 }}>{filtered.length === 1 ? t("tripsDeleteListedOne") : t("tripsDeleteListedMany").replace("{{n}}", filtered.length)}</h3>
+            <p style={{ margin: 0, color: "var(--mid)" }}>
+              {t("tripsDeleteListedBody")}
+            </p>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+              <button type="button" onClick={() => setConfirmDeleteListed(false)} style={{ border: "1px solid var(--line)", background: "var(--surface2)", color: "var(--ink)", borderRadius: 8, padding: "9px 12px", cursor: "pointer" }}>
+                {t("cancel")}
+              </button>
+              <button type="button" onClick={deleteListed} style={{ border: "1px solid color-mix(in srgb, var(--red) 40%, transparent)", background: "var(--red-bg)", color: "var(--red)", borderRadius: 8, padding: "9px 12px", fontWeight: 700, cursor: "pointer" }}>
+                {t("deleteN").replace("{{n}}", filtered.length)}
               </button>
             </div>
           </div>
@@ -940,18 +1025,18 @@ export default function Trips() {
 
       {/* Archive Confirmation Modal */}
       {confirmArchive ? (
-        <div className="modal-backdrop-anim" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "grid", placeItems: "center", zIndex: 30 }}>
-          <div style={{ width: "min(420px,90vw)", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-md)", padding: "var(--space-6)", display: "grid", gap: "var(--space-4)" }}>
-            <h3 style={{ margin: 0 }}>Archive Trip</h3>
+        <div className="modal-backdrop-anim" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "grid", placeItems: "center", zIndex: 1000 }}>
+          <div role="dialog" aria-modal="true" style={{ width: "min(420px,90vw)", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: "var(--radius-md)", padding: "var(--space-6)", display: "grid", gap: "var(--space-4)" }}>
+            <h3 style={{ margin: 0 }}>{t("tripsArchiveTitle")}</h3>
             <p style={{ margin: 0, color: "var(--mid)" }}>
-              Are you sure you want to archive this trip? It will no longer appear in active listings.
+              {t("tripsArchiveBody")}
             </p>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
               <button type="button" onClick={() => setConfirmArchive(null)} style={{ border: "1px solid var(--line)", background: "var(--surface2)", color: "var(--ink)", borderRadius: 8, padding: "9px 12px", cursor: "pointer" }}>
-                Cancel
+                {t("cancel")}
               </button>
               <button type="button" onClick={() => { archive(confirmArchive); setConfirmArchive(null); }} style={{ border: "1px solid var(--blue-bdr)", background: "var(--blue-bg)", color: "var(--blue)", borderRadius: 8, padding: "9px 12px", fontWeight: 700, cursor: "pointer" }}>
-                Archive
+                {t("archive")}
               </button>
             </div>
           </div>

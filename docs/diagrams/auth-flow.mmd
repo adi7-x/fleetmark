@@ -1,0 +1,46 @@
+%% FLEETMARK / SSBS — Auth flow (derived from apps/users/views.py + settings.py + apps/users/permissions.py + frontend Landing.jsx / AuthCallback.jsx)
+%% Reflects current code, INCLUDING the H2 OAuth-state fix. NOTE: 2FA is not yet server-enforced (H1 pending) — see the note.
+sequenceDiagram
+    autonumber
+    actor U as User (browser)
+    participant FE as SPA (Landing / AuthCallback)
+    participant WAF as WAF :8443
+    participant BE as Django backend
+    participant I42 as 42 Intra API
+    participant DB as PostgreSQL
+
+    U->>FE: Click "Login with 42"
+    FE->>WAF: GET /api/v1/auth/42/login/
+    WAF->>BE: proxy
+    BE-->>FE: 200 { authorization_url } + Set-Cookie fleetmark_oauth_state<br/>(HttpOnly, Secure, SameSite=Lax, 10 min) [H2]
+    FE->>I42: window.location → /oauth/authorize?client_id&redirect_uri&response_type=code&state
+    I42-->>U: 42 login + consent screen
+    I42->>WAF: 302 → /api/v1/auth/42/callback/?code&state
+    WAF->>BE: proxy (state cookie sent via SameSite=Lax)
+
+    BE->>BE: validate state == cookie (secrets.compare_digest) [H2]
+    alt state missing / mismatched
+        BE-->>U: 400 Invalid or missing OAuth state
+    else state valid
+        BE->>I42: POST /oauth/token (code, client_secret)
+        I42-->>BE: access_token  (non-200 → 502)
+        BE->>I42: GET /v2/me (Bearer access_token)
+        I42-->>BE: { login, email }
+        BE->>DB: get_or_create User by login_42
+        Note over BE,DB: role = LOGISTICS_STAFF if login == ADMIN_42_LOGIN, else STUDENT
+        BE->>BE: issue JWT pair — access 60 min, refresh 7 days (SimpleJWT)
+        BE-->>FE: 302 → FRONTEND_URL/auth/callback#access&refresh&role&login&totp
+        FE->>FE: store access + refresh in localStorage (H3 pending)
+        FE->>WAF: GET /api/v1/auth/me/ (Bearer)
+        WAF->>BE: proxy → returns profile
+        opt totp flag == 1 (user.totp_enabled)
+            FE->>U: prompt for 6-digit TOTP code
+            U->>FE: code
+            FE->>BE: POST /api/v1/auth/2fa/verify/ (Bearer + code)
+            BE-->>FE: 200 verified (pyotp, valid_window=1)
+        end
+        FE->>U: redirect by role → /admin | /passenger | /driver | /onboarding
+    end
+
+    Note over BE: RBAC (apps/users/permissions.py). Every request is JWTAuthentication + IsAuthenticated.<br/>Roles: STUDENT, LOGISTICS_STAFF, DRIVER.<br/>IsLogisticsStaff → admin CRUD (trips, buses, routes, stations, drivers, users, announcement writes).<br/>Students → own reservations / reports / profile only.<br/>HasAPIKey (X-API-Key) is the default but is overridden by most views.
+    Note over FE,BE: 2FA is currently ADVISORY: the JWT is issued and valid BEFORE any TOTP check,<br/>so the prompt is client-side only. Server-side enforcement is H1 (pending approval).

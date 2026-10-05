@@ -1,12 +1,43 @@
 import React, { useEffect, useState } from "react";
 import Spinner from "../components/ui/Spinner";
-import { auth as apiAuth } from "../services/api";
-import { API_BASE } from "../services/api";
+import { auth as apiAuth, API_BASE } from "../services/api";
+import { useTranslation } from "../context/TranslationContext";
 
+// The landing page reads ?auth_error and explains it to the user.
+const FAIL_URL = "/?auth_error=provider";
+
+// The OAuth fragment is a one-shot credential: we strip it from the URL the
+// moment we read it so the access token can't linger in the address bar,
+// browser history or a Referer header. That makes reading it *destructive* —
+// and an effect in React StrictMode is mounted, torn down and mounted again,
+// so a naive re-read finds an empty hash and reports a perfectly good login
+// as a failure. Cache the parsed payload the first time and hand the same
+// object to every later caller.
+let cachedFragment = null;
+
+function consumeOAuthFragment() {
+  if (cachedFragment) return cachedFragment;
+
+  const raw = window.location.hash.replace(/^#/, "");
+  const params = new URLSearchParams(raw);
+  cachedFragment = {
+    access: params.get("access"),
+    preauth: params.get("preauth"),
+    role: params.get("role"),
+    login: params.get("login"),
+    totp: params.get("totp"),
+  };
+
+  if (raw) {
+    window.history.replaceState({}, "", window.location.pathname);
+  }
+
+  return cachedFragment;
+}
 
 function redirectByRole(user) {
   if (!user) {
-    window.location.replace("/?error=auth_failed");
+    window.location.replace(FAIL_URL);
     return;
   }
 
@@ -26,37 +57,28 @@ function redirectByRole(user) {
     return;
   }
 
-  window.location.replace("/?error=auth_failed");
+  window.location.replace(FAIL_URL);
 }
 
 export default function AuthCallback() {
+  const { t } = useTranslation();
   const [totpRequired, setTotpRequired] = useState(false);
   const [totpCode, setTotpCode] = useState("");
   const [totpError, setTotpError] = useState("");
   const [totpLoading, setTotpLoading] = useState(false);
-  const [pendingUser, setPendingUser] = useState(null);
+  const [preauthToken, setPreauthToken] = useState(null);
 
   async function verifyTotpAndContinue() {
     setTotpLoading(true);
     setTotpError("");
     try {
-      const token = localStorage.getItem("fleetmark_access");
-      const res = await fetch(`${API_BASE}/auth/2fa/verify/`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-          "X-API-Key": import.meta.env.VITE_API_KEY,
-        },
-        body: JSON.stringify({ code: totpCode }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || "Invalid code.");
-      }
-      redirectByRole(pendingUser);
+      // Exchanges the pre-auth token + TOTP code for the real session. On
+      // success the backend sets the refresh cookie and we get an access
+      // token + the full user back — no session existed before this call.
+      const user = await apiAuth.verifyTotpLogin(preauthToken, totpCode);
+      redirectByRole(user);
     } catch (err) {
-      setTotpError(err.message || "Verification failed.");
+      setTotpError(err.message || t("twoFaInvalidCode"));
     } finally {
       setTotpLoading(false);
     }
@@ -67,71 +89,48 @@ export default function AuthCallback() {
 
     async function run() {
       try {
-        const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
-        const hashAccess = hashParams.get("access");
-        const hashRefresh = hashParams.get("refresh");
-        const hashRole = hashParams.get("role");
-        const hashLogin = hashParams.get("login");
-        const hashTotp = hashParams.get("totp");
+        const {
+          access: hashAccess,
+          preauth: hashPreauth,
+          role: hashRole,
+          login: hashLogin,
+          totp: hashTotp,
+        } = consumeOAuthFragment();
 
-        if (hashAccess && hashRefresh) {
-          const meRes = await fetch(`${API_BASE}/auth/me/`, {
-            headers: { Authorization: `Bearer ${hashAccess}`, "X-API-Key": import.meta.env.VITE_API_KEY },
-          });
-          if (!meRes.ok) throw new Error("Failed to fetch user profile.");
-          const user = await meRes.json();
-
-          localStorage.setItem("fleetmark_access", hashAccess);
-          localStorage.setItem("fleetmark_refresh", hashRefresh);
-          localStorage.setItem(
-            "fleetmark_user",
-            JSON.stringify({
-              ...user,
-              role: user.role || hashRole || "STUDENT",
-              login_42: user.login_42 || hashLogin || "",
-            })
-          );
-
-          window.history.replaceState({}, "", "/auth/callback");
-
-          // Check if 2FA verification is required
-          if (hashTotp === "1" && active) {
-            setPendingUser(user);
+        // 2FA required: no session yet. Show the code prompt; the real
+        // tokens only get minted once verifyTotpAndContinue() succeeds.
+        if (hashTotp === "1" && hashPreauth) {
+          if (active) {
+            setPreauthToken(hashPreauth);
             setTotpRequired(true);
-            return;
           }
-
-          if (active) redirectByRole(user);
           return;
         }
 
-        const params = new URLSearchParams(window.location.search);
-        const code = params.get("code");
+        if (!hashAccess) throw new Error("Missing OAuth callback payload.");
 
-        if (!code) throw new Error("Missing OAuth code.");
+        // Fetch the canonical profile with the fresh access token (the
+        // refresh token is already sitting in an HttpOnly cookie — this
+        // page never sees it).
+        const meRes = await fetch(`${API_BASE}/auth/me/`, {
+          credentials: "include",
+          headers: { Authorization: `Bearer ${hashAccess}` },
+        });
+        if (!meRes.ok) throw new Error("Failed to fetch user profile.");
+        const profile = await meRes.json();
 
-        const data = await apiAuth.handleCallback(code);
-        const access = data?.access;
-        const refresh = data?.refresh;
-        const user = data?.user;
-        const totp = data?.totp_required;
+        const user = {
+          ...profile,
+          role: profile.role || hashRole || "STUDENT",
+          login_42: profile.login_42 || hashLogin || "",
+        };
 
-        if (!access || !refresh || !user) throw new Error("Incomplete callback payload.");
-
-        localStorage.setItem("fleetmark_access", access);
-        localStorage.setItem("fleetmark_refresh", refresh);
-        localStorage.setItem("fleetmark_user", JSON.stringify(user));
-
-        if (totp && active) {
-          setPendingUser(user);
-          setTotpRequired(true);
-          return;
-        }
+        apiAuth.completeLogin(hashAccess, user);
 
         if (active) redirectByRole(user);
       } catch (err) {
         console.error("[AuthCallback] Auth failed:", err?.message || err);
-        if (active) window.location.replace("/?error=auth_failed");
+        if (active) window.location.replace(FAIL_URL);
       }
     }
 
@@ -173,15 +172,16 @@ export default function AuthCallback() {
             security
           </span>
           <h2 style={{ margin: 0, fontSize: 22, fontWeight: 800 }}>
-            Two-Factor Authentication
+            {t("twoFaTitle")}
           </h2>
           <p style={{ margin: 0, fontSize: 14, color: "var(--mid)" }}>
-            Enter the 6-digit code from your authenticator app.
+            {t("cbTwoFaDesc")}
           </p>
           <input
             value={totpCode}
             onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
             placeholder="000000"
+            aria-label={t("twoFaCodeLabel")}
             maxLength={6}
             inputMode="numeric"
             autoComplete="one-time-code"
@@ -225,12 +225,12 @@ export default function AuthCallback() {
               transition: "all 0.2s ease",
             }}
           >
-            {totpLoading ? "Verifying…" : "Verify & Continue"}
+            {totpLoading ? t("loading") : t("cbVerify")}
           </button>
         </div>
       </div>
     );
   }
 
-  return <Spinner size={42} text="Finalizing 42 authentication..." />;
+  return <Spinner size={42} text={t("cbFinalizing")} />;
 }

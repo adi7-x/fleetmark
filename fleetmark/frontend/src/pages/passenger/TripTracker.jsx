@@ -1,70 +1,89 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import EmptyState from "../../components/ui/EmptyState";
-import RouteMap from "../../components/ui/RouteMap";
-import { API_BASE, getUser } from "../../services/api";
+import { API_BASE, getUser, authFetch, errorMessage } from "../../services/api";
+import { useTranslation } from "../../context/TranslationContext";
+import { fmtDateTime, fmtTime, inTonightWindow, untilLabel } from "../../utils/datetime";
 
-function formatTime(dateStr) {
-  if (!dateStr) return "--:--";
-  return new Date(dateStr).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
+const card = {
+  background: "var(--surface)",
+  border: "1px solid var(--border)",
+  borderRadius: 16,
+  padding: "var(--space-6)",
+  display: "grid",
+  gap: "var(--space-4)",
+  boxShadow: "var(--shadow-sm)",
+};
 
-function getMinutesUntil(dateStr) {
-  if (!dateStr) return null;
-  const diff = new Date(dateStr) - new Date();
-  return Math.max(0, Math.round(diff / 60000));
-}
+// A trip stays "current" for 30 min after it leaves, then drops off.
+const STILL_CURRENT_MS = 30 * 60 * 1000;
 
+/**
+ * Trip status. There is no GPS feed yet, so this shows only what the system
+ * actually knows: the student's booked trip, its scheduled departure from
+ * 1337, and the real ordered stops with the student's stop highlighted.
+ */
 export default function TripTracker() {
-  const user = useMemo(() => getUser(), []);
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const [user] = useState(() => getUser());
   const [trip, setTrip] = useState(null);
+  const [booked, setBooked] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [now, setNow] = useState(new Date());
+  const [now, setNow] = useState(() => Date.now());
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const token = localStorage.getItem("fleetmark_access");
-      if (!token || !user?.station) throw new Error("Missing session.");
-      const res = await fetch(
-        `${API_BASE}/trips/available/?station_id=${encodeURIComponent(user.station)}`,
-        { headers: { Authorization: `Bearer ${token}`, "X-API-Key": import.meta.env.VITE_API_KEY } }
-      );
-      if (!res.ok) throw new Error("Failed to load trip data.");
-      const data = await res.json();
-      const trips = Array.isArray(data) ? data : [];
-      setTrip(trips[0] || null);
+      const [res, hRes] = await Promise.all([
+        authFetch(`${API_BASE}/reservations/`),
+        authFetch(`${API_BASE}/reservations/history/`),
+      ]);
+      if (!res.ok) throw new Error(await errorMessage(res, t("couldntLoad")));
+      const reservations = await res.json();
+      const history = hRes.ok ? await hRes.json() : [];
+      const cutoff = Date.now() - STILL_CURRENT_MS;
+      const mine = (Array.isArray(reservations) ? reservations : [])
+        .map((r) => r.trip_details)
+        .filter((tr) => tr && new Date(tr.departure_datetime).getTime() >= cutoff)
+        .sort((a, b) => new Date(a.departure_datetime) - new Date(b.departure_datetime));
+      // Already rode tonight (trip archived after departure): show that, not a trip to book.
+      const rodeTonight = [...(Array.isArray(reservations) ? reservations : []), ...(Array.isArray(history) ? history : [])]
+        .map((r) => r.trip_details)
+        .find((tr) => tr && inTonightWindow(tr.departure_datetime));
+      if (mine.length || rodeTonight) {
+        setTrip(mine[0] || rodeTonight);
+        setBooked(true);
+        return;
+      }
+      setBooked(false);
+      if (!user?.station) {
+        setTrip(null);
+        return;
+      }
+      const aRes = await authFetch(`${API_BASE}/trips/available/?station_id=${encodeURIComponent(user.station)}`);
+      if (!aRes.ok) throw new Error(await errorMessage(aRes, t("couldntLoad")));
+      const available = await aRes.json();
+      setTrip((Array.isArray(available) ? available : [])[0] || null);
     } catch (err) {
-      setError(err.message || "Unable to load tracker.");
+      setError(err.message || t("couldntLoad"));
     } finally {
       setLoading(false);
     }
-  }, [user?.station]);
+  }, [t, user?.station]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
     window.addEventListener("fleetmark:refresh", load);
     return () => window.removeEventListener("fleetmark:refresh", load);
   }, [load]);
-
-  // Live clock tick every 30s
   useEffect(() => {
-    const timer = setInterval(() => setNow(new Date()), 30000);
-    return () => clearInterval(timer);
+    const id = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(id);
   }, []);
 
-  const eta = trip ? getMinutesUntil(trip.departure_datetime) : null;
-  const departed = eta !== null && eta <= 0;
-  const stopsCount = trip?.route_stops_count || 4;
-
-  // Simulate bus position along stops (1-indexed for timeline)
-  const currentStop = trip
-    ? Math.min(stopsCount, Math.max(1, stopsCount - Math.floor((eta || 0) / 10)))
-    : 1;
-  const routeMapStopIndex = Math.max(0, Math.min((stopsCount || 4) - 1, currentStop - 1));
-
-  // Skeleton
   if (loading) {
     return (
       <div style={{ display: "grid", gap: "var(--space-5)" }}>
@@ -73,299 +92,97 @@ export default function TripTracker() {
           <div className="skeleton-bar" style={{ width: "40%", height: 14 }} />
           <div className="skeleton-bar" style={{ width: "80%", height: 60 }} />
         </div>
-        <div className="skeleton-card animate-in">
-          <div className="skeleton-bar" style={{ width: "30%", height: 14 }} />
-          <div className="skeleton-bar" style={{ width: "100%", height: 120 }} />
-        </div>
       </div>
     );
   }
 
-  if (error && !trip) {
-    return <div className="animate-in"><EmptyState icon="error" title="Tracker unavailable" subtitle={error} /></div>;
-  }
+  if (error && !trip) return <EmptyState icon="cloud_off" title={t("couldntLoad")} subtitle={error} />;
 
   if (!trip) {
     return (
-      <div
-        className="animate-in"
-        style={{
-          border: "1px solid var(--border)",
-          borderRadius: 16,
-          background: "var(--surface)",
-          padding: "var(--space-8) var(--space-6)",
-          textAlign: "center",
-          display: "grid",
-          placeItems: "center",
-          gap: "var(--space-3)",
-          boxShadow: "var(--shadow-sm)",
-        }}
-      >
-        <div style={{ width: 56, height: 56, borderRadius: "50%", background: "var(--surface2)", display: "grid", placeItems: "center" }}>
-          <span className="material-symbols-outlined" style={{ fontSize: 28, color: "var(--dim)" }}>directions_bus</span>
-        </div>
-        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>No active trips</h3>
-        <p style={{ margin: 0, fontSize: 13, color: "var(--mid)", maxWidth: 300 }}>
-          There are no buses running from your station right now. Check back closer to departure time.
-        </p>
-        <button
-          type="button"
-          onClick={() => window.location.href = "/passenger/reserve"}
-          style={{
-            border: "1px solid var(--blue-border, var(--blue))",
-            background: "var(--blue-light)",
-            color: "var(--blue)",
-            borderRadius: 10,
-            padding: "10px 20px",
-            fontWeight: 700,
-            cursor: "pointer",
-            fontSize: 13,
-            marginTop: 4,
-          }}
-        >
-          Browse Schedule →
+      <div className="animate-in" style={{ ...card, textAlign: "center", placeItems: "center" }}>
+        <span className="material-symbols-outlined" style={{ fontSize: 32, color: "var(--dim)" }}>directions_bus</span>
+        <h3 style={{ margin: 0, fontSize: 16 }}>{t("trackerNoTripTitle")}</h3>
+        <p style={{ margin: 0, fontSize: 13, color: "var(--mid)", maxWidth: 340 }}>{t("trackerNoTripDesc")}</p>
+        <button type="button" className="student-quick-action" onClick={() => navigate("/passenger/reserve")}>
+          {t("browseSchedule")}
         </button>
       </div>
     );
   }
 
+  const departure = new Date(trip.departure_datetime).getTime();
+  const minsLeft = (departure - now) / 60000;
+  const status = minsLeft < 0 ? "departed" : minsLeft <= 30 ? "soon" : "scheduled";
+  const statusStyle = {
+    scheduled: { color: "var(--blue)", bg: "var(--blue-light)", label: t("statusScheduled") },
+    soon: { color: "var(--amber)", bg: "var(--amber-light)", label: t("statusBoardingSoon") },
+    departed: { color: "var(--green)", bg: "var(--green-light)", label: t("statusDeparted") },
+  }[status];
+  const stops = trip.route_stops || [];
+  const myStop = user?.station_name;
+
   return (
     <div style={{ display: "grid", gap: "var(--space-5)" }}>
-      {/* Hero ETA card */}
-      <section
-        className="animate-in"
-        style={{
-          background: "var(--surface)",
-          border: "1px solid var(--border)",
-          borderRadius: 16,
-          padding: "var(--space-6)",
-          display: "grid",
-          gap: "var(--space-4)",
-          boxShadow: "var(--shadow-md)",
-          position: "relative",
-          overflow: "hidden",
-        }}
-      >
-        {/* Accent glow */}
-        <div
-          style={{
-            position: "absolute",
-            top: -40,
-            right: -40,
-            width: 160,
-            height: 160,
-            borderRadius: "50%",
-            background: departed
-              ? "color-mix(in srgb, var(--green) 12%, transparent)"
-              : "color-mix(in srgb, var(--blue) 12%, transparent)",
-            filter: "blur(40px)",
-            pointerEvents: "none",
-          }}
-        />
-
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", position: "relative" }}>
+      <section className="animate-in" style={card}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, flexWrap: "wrap" }}>
           <div>
-            <span
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                padding: "4px 12px",
-                borderRadius: 999,
-                fontSize: 11,
-                fontWeight: 700,
-                textTransform: "uppercase",
-                letterSpacing: "0.06em",
-                background: departed
-                  ? "var(--green-light)"
-                  : "var(--blue-light)",
-                color: departed ? "var(--green)" : "var(--blue)",
-                border: `1px solid ${departed ? "var(--green-border)" : "var(--blue-border)"}`,
-              }}
-            >
-              <span
-                style={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: "50%",
-                  background: departed ? "var(--green)" : "var(--blue)",
-                  animation: "fm-pulse 1.8s ease-in-out infinite",
-                }}
-              />
-              {departed ? "Departed" : "En Route"}
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 12px", borderRadius: 999, fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", background: statusStyle.bg, color: statusStyle.color }}>
+              {statusStyle.label}
             </span>
-            <h2 style={{ margin: "12px 0 4px", fontSize: 24, fontWeight: 700, letterSpacing: "-0.02em" }}>
-              {trip.route_name || "Shuttle"}
-            </h2>
+            <h2 style={{ margin: "12px 0 4px", fontSize: 24, fontWeight: 700, letterSpacing: "-0.02em" }}>{trip.route_name}</h2>
             <p style={{ margin: 0, fontSize: 13, color: "var(--mid)" }}>
-              Bus: {trip.bus_name || "—"} • {stopsCount} stops
+              {fmtDateTime(trip.departure_datetime)} · {trip.bus_name} · {stops.length} {t("stops")}
             </p>
           </div>
           <div style={{ textAlign: "right" }}>
             <span style={{ fontSize: 11, textTransform: "uppercase", color: "var(--dim)", fontWeight: 700, letterSpacing: "0.08em" }}>
-              {departed ? "Departed at" : "Departs in"}
+              {status === "departed" ? t("departedAt") : t("departsIn")}
             </span>
-            <div className="mono" style={{ fontSize: 48, fontWeight: 700, letterSpacing: "-0.04em", lineHeight: 1, marginTop: 4, color: departed ? "var(--green)" : "var(--text-primary)" }}>
-              {departed ? formatTime(trip.departure_datetime) : eta !== null ? `${eta}m` : "--"}
+            <div className="mono" style={{ fontSize: 40, fontWeight: 700, letterSpacing: "-0.04em", lineHeight: 1.1, marginTop: 4 }}>
+              {status === "departed" ? fmtTime(trip.departure_datetime) : untilLabel(trip.departure_datetime, now)}
             </div>
-            {!departed && (
-              <span className="mono" style={{ fontSize: 12, color: "var(--mid)", marginTop: 4, display: "block" }}>
-                at {formatTime(trip.departure_datetime)}
-              </span>
-            )}
+            {status !== "departed" ? (
+              <span className="mono" style={{ fontSize: 12, color: "var(--mid)" }}>{t("atTime").replace("{{time}}", fmtTime(trip.departure_datetime))}</span>
+            ) : null}
           </div>
         </div>
 
-        {/* Seat info */}
-        {typeof trip.seats_left === "number" && (
-          <div
-            style={{
-              display: "flex",
-              gap: "var(--space-4)",
-              padding: "14px 16px",
-              background: "var(--surface2)",
-              borderRadius: 10,
-              border: "1px solid var(--border)",
-            }}
-          >
-            <div>
-              <span style={{ fontSize: 10, textTransform: "uppercase", color: "var(--dim)", fontWeight: 700 }}>Seats Left</span>
-              <div className="mono" style={{ fontSize: 20, fontWeight: 700, marginTop: 2 }}>
-                {trip.seats_left}
-              </div>
-            </div>
-            {trip.bus_seat_capacity && (
-              <div>
-                <span style={{ fontSize: 10, textTransform: "uppercase", color: "var(--dim)", fontWeight: 700 }}>Capacity</span>
-                <div className="mono" style={{ fontSize: 20, fontWeight: 700, marginTop: 2 }}>
-                  {trip.bus_seat_capacity}
-                </div>
-              </div>
-            )}
+        {booked && status === "departed" ? null : booked ? (
+          <p style={{ margin: 0, padding: "10px 14px", borderRadius: 10, background: "var(--green-light)", color: "var(--green)", fontSize: 13, fontWeight: 600 }}>
+            {t("trackerBooked")}
+          </p>
+        ) : (
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "10px 14px", borderRadius: 10, background: "var(--surface2)" }}>
+            <span style={{ fontSize: 13, color: "var(--mid)", flex: 1 }}>{t("trackerNotBooked")}</span>
+            <button type="button" className="student-quick-action" onClick={() => navigate("/passenger/reserve")}>{t("reserveNow")}</button>
           </div>
         )}
       </section>
 
-      {/* Route timeline */}
-      <section
-        className="animate-in"
-        style={{
-          background: "var(--surface)",
-          border: "1px solid var(--border)",
-          borderRadius: 16,
-          padding: "var(--space-6)",
-          display: "grid",
-          gap: "var(--space-4)",
-          boxShadow: "var(--shadow-sm)",
-        }}
-      >
+      <section className="animate-in" style={card}>
         <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--mid)" }}>
-          Route Progress
+          {t("trackerStops")}
         </h3>
-        <div style={{ display: "grid", gap: 0 }}>
-          {Array.from({ length: stopsCount }, (_, i) => {
-            const stopNum = i + 1;
-            const isCurrent = stopNum === currentStop;
-            const isPast = stopNum < currentStop;
+        <ol style={{ listStyle: "none", margin: 0, padding: 0, display: "grid" }}>
+          {["1337", ...stops].map((name, i, all) => {
+            const isMine = name === myStop;
+            const isStart = i === 0;
             return (
-              <div key={i} style={{ display: "flex", gap: 16, minHeight: 48 }}>
-                {/* Timeline column */}
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 24 }}>
-                  <div
-                    style={{
-                      width: isCurrent ? 16 : 10,
-                      height: isCurrent ? 16 : 10,
-                      borderRadius: "50%",
-                      background: isCurrent ? "var(--blue)" : isPast ? "var(--green)" : "var(--surface3)",
-                      border: isCurrent ? "3px solid var(--blue-mid)" : "none",
-                      flexShrink: 0,
-                      transition: "all 0.3s ease",
-                      boxShadow: isCurrent ? "0 0 0 4px var(--accent-glow)" : "none",
-                    }}
-                  />
-                  {i < stopsCount - 1 && (
-                    <div
-                      style={{
-                        flex: 1,
-                        width: 2,
-                        background: isPast ? "var(--green)" : "var(--border)",
-                        minHeight: 24,
-                        transition: "background 0.3s ease",
-                      }}
-                    />
-                  )}
+              <li key={`${name}-${i}`} style={{ display: "flex", gap: 14, minHeight: 40 }}>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 18 }}>
+                  <span style={{ width: isMine || isStart ? 14 : 9, height: isMine || isStart ? 14 : 9, borderRadius: "50%", marginTop: 4, flexShrink: 0, background: isMine ? "var(--blue)" : isStart ? "var(--ink)" : "var(--surface3)", boxShadow: isMine ? "0 0 0 4px var(--accent-glow)" : "none" }} />
+                  {i < all.length - 1 ? <span style={{ flex: 1, width: 2, background: "var(--border)", minHeight: 18 }} /> : null}
                 </div>
-                {/* Stop label */}
-                <div style={{ paddingTop: isCurrent ? 0 : 0, paddingBottom: 12 }}>
-                  <span
-                    style={{
-                      fontSize: 14,
-                      fontWeight: isCurrent ? 700 : isPast ? 500 : 400,
-                      color: isCurrent ? "var(--text-primary)" : isPast ? "var(--green)" : "var(--text-tertiary)",
-                    }}
-                  >
-                    {i === 0 ? "Departure" : i === stopsCount - 1 ? "Arrival" : `Stop ${stopNum}`}
-                  </span>
-                  {isCurrent && (
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 4,
-                        marginLeft: 8,
-                        fontSize: 11,
-                        fontWeight: 700,
-                        color: "var(--blue)",
-                      }}
-                    >
-                      <span className="material-symbols-outlined" style={{ fontSize: 14, fontVariationSettings: "'FILL' 1" }}>
-                        directions_bus
-                      </span>
-                      Bus here
-                    </span>
-                  )}
-                  {isPast && (
-                    <span className="material-symbols-outlined" style={{ fontSize: 14, marginLeft: 6, color: "var(--green)", verticalAlign: "middle", fontVariationSettings: "'FILL' 1" }}>
-                      check_circle
-                    </span>
-                  )}
+                <div style={{ paddingBottom: 10, fontSize: 14, fontWeight: isMine || isStart ? 700 : 400, color: isMine ? "var(--blue)" : "var(--text-primary)" }}>
+                  {isStart ? t("trackerStart") : name}
+                  {isMine ? <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700 }}>· {t("yourStop")}</span> : null}
                 </div>
-              </div>
+              </li>
             );
           })}
-        </div>
-      </section>
-
-      {/* Live Map */}
-      <section
-        className="animate-in"
-        style={{
-          background: "var(--surface)",
-          border: "1px solid var(--border)",
-          borderRadius: 16,
-          padding: "var(--space-6)",
-          display: "grid",
-          gap: "var(--space-4)",
-          boxShadow: "var(--shadow-sm)",
-        }}
-      >
-        <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--mid)" }}>
-          Live Map
-        </h3>
-        <div style={{ 
-          position: "relative", 
-          width: "100%", 
-          height: 380, 
-          borderRadius: 12, 
-          border: "1px solid color-mix(in srgb, var(--border) 50%, transparent)", 
-          background: "var(--surface)", 
-          overflow: "hidden", 
-          display: "grid", 
-          placeItems: "center",
-          padding: 24
-        }}>
-          <RouteMap animated currentStop={routeMapStopIndex} />
-        </div>
+        </ol>
+        <p style={{ margin: 0, fontSize: 12, color: "var(--dim)" }}>{t("trackerNoGps")}</p>
       </section>
     </div>
   );

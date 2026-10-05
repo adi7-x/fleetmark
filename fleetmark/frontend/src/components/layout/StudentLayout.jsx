@@ -3,21 +3,16 @@ import { useTranslation } from "../../context/TranslationContext";
 import UserIdentity from "../ui/UserIdentity";
 import Button from "../ui/Button";
 import DarkModeToggle from "../ui/DarkModeToggle";
-import { API_BASE } from "../../services/api";
+import { API_BASE, getAccessToken, authFetch } from "../../services/api";
 
+/* Labels match the page titles in App.jsx (STUDENT_TITLES). Also used as the
+   mobile bottom tabs; notifications stay on the header bell. */
 const navItems = [
-  { id: "dashboard", labelKey: "navDashboard", path: "/passenger",           icon: "dashboard"  },
-  { id: "bookings",  labelKey: "navBookings",  path: "/passenger/reserve",   icon: "event_seat" },
-  { id: "history",   labelKey: "navHistory",   path: "/passenger/history",   icon: "history"    },
-  { id: "settings",  labelKey: "navSettings",  path: "/passenger/settings",  icon: "settings"   },
-];
-
-/* Bottom nav tabs for mobile */
-const bottomNavItems = [
-  { id: "dashboard",     labelKey: "navDashboard",      path: "/passenger",               icon: "dashboard"     },
-  { id: "bookings",      labelKey: "navBookings",       path: "/passenger/reserve",       icon: "event_seat"    },
-  { id: "notifications", labelKey: "navNotifications",  path: "/passenger/notifications", icon: "notifications" },
-  { id: "profile",       labelKey: "navProfile",        path: "/passenger/settings",      icon: "person"        },
+  { id: "dashboard", labelKey: "navDashboard",  path: "/passenger",          icon: "dashboard"      },
+  { id: "bookings",  labelKey: "quickBookSeat", path: "/passenger/reserve",  icon: "event_seat"     },
+  { id: "history",   labelKey: "quickMyTrips",  path: "/passenger/history",  icon: "history"        },
+  { id: "tracker",   labelKey: "navTracker",    path: "/passenger/live-map", icon: "directions_bus" },
+  { id: "profile",   labelKey: "navProfile",    path: "/passenger/settings", icon: "person"         },
 ];
 
 export default function StudentLayout({
@@ -28,20 +23,20 @@ export default function StudentLayout({
   children,
   pageTitle = "Overview",
 }) {
-  const stationName = user?.station_name || "No station set";
   const login       = user?.login_42 || "student";
   const { t, lang, setLang } = useTranslation();
+  const stationName = user?.station_name || t("noStationSet");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [unread, setUnread] = useState(0);
 
   useEffect(() => {
     let active = true;
     async function fetchUnread() {
-      const token = localStorage.getItem("fleetmark_access");
+      const token = getAccessToken();
       if (!token) return;
       try {
-        const res = await fetch(`${API_BASE}/announcements/`, {
-          headers: { Authorization: `Bearer ${token}`, "X-API-Key": import.meta.env.VITE_API_KEY }
+        const res = await authFetch(`${API_BASE}/announcements/`, {
+          headers: { Authorization: `Bearer ${token}` }
         });
         if (res.ok && active) {
           const data = await res.json();
@@ -52,9 +47,11 @@ export default function StudentLayout({
 
     fetchUnread();
     window.addEventListener("fleetmark:refresh", fetchUnread);
+    window.addEventListener("fleetmark:badge", fetchUnread);
     return () => {
       active = false;
       window.removeEventListener("fleetmark:refresh", fetchUnread);
+      window.removeEventListener("fleetmark:badge", fetchUnread);
     };
   }, []);
 
@@ -63,15 +60,25 @@ export default function StudentLayout({
     setDrawerOpen(false);
   }, [activePath]);
 
+  // Close drawer on Escape
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const onKey = (e) => { if (e.key === "Escape") setDrawerOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [drawerOpen]);
+
   function handleNavigate(path) {
     onNavigate?.(path);
     setDrawerOpen(false);
   }
 
   function isActive(itemPath) {
-    if (itemPath === "/passenger") return activePath === "/passenger";
-    return activePath.startsWith(itemPath);
+    const path = (activePath || "").replace(/\/+$/, "") || "/";
+    if (itemPath === "/passenger") return path === "/passenger";
+    return path === itemPath || path.startsWith(`${itemPath}/`);
   }
+  const onNotifications = isActive("/passenger/notifications");
 
   const sidebar = (
     <>
@@ -95,7 +102,7 @@ export default function StudentLayout({
             fontWeight: "var(--font-medium)",
           }}
         >
-          1337 Shuttle System
+          {t("appTagline")}
         </div>
       </div>
 
@@ -109,9 +116,11 @@ export default function StudentLayout({
               type="button"
               onClick={() => handleNavigate(item.path)}
               className={`nav-item${active ? " active" : ""}`}
+              aria-current={active ? "page" : undefined}
             >
               <span
                 className="material-symbols-outlined"
+                aria-hidden="true"
                 style={{
                   fontSize: 20,
                   flexShrink: 0,
@@ -138,7 +147,7 @@ export default function StudentLayout({
       >
         {/* Language switcher */}
         <div style={{ display: "flex", gap: 4, padding: "2px var(--space-3) 6px" }}>
-          {["en", "fr", "ar"].map((l) => (
+          {["en", "fr"].map((l) => (
             <button
               key={l}
               type="button"
@@ -153,7 +162,7 @@ export default function StudentLayout({
                 fontWeight: lang === l ? 700 : 500,
                 cursor: "pointer",
                 fontSize: 11,
-                letterSpacing: l === "ar" ? "0" : "0.02em",
+                letterSpacing: "0.02em",
               }}
             >
               {l.toUpperCase()}
@@ -171,13 +180,13 @@ export default function StudentLayout({
             {t("navNewBooking")}
           </Button>
         </div>
-        <UserIdentity login={login} role="Passenger" />
+        <UserIdentity login={login} role={t("roleStudent")} />
         <button
           type="button"
           className="nav-item"
           onClick={onLogout}
         >
-          <span className="material-symbols-outlined" style={{ fontSize: 20, flexShrink: 0, lineHeight: 1 }}>
+          <span className="material-symbols-outlined" aria-hidden="true" style={{ fontSize: 20, flexShrink: 0, lineHeight: 1 }}>
             logout
           </span>
           {t("navLogout")}
@@ -189,13 +198,13 @@ export default function StudentLayout({
   return (
     <div className="layout-root" style={{ '--accent': '#818cf8', '--accent2': '#a78bfa', '--accent-light': 'rgba(99,102,241,0.1)', '--accent-mid': 'rgba(99,102,241,0.15)', '--accent-border': 'rgba(99,102,241,0.28)', '--accent-glow': 'rgba(99,102,241,0.25)', '--accent-dim': '#ede9fe' }}>
       {/* Skip-to-content link — Fix 3c */}
-      <a href="#main-content" className="skip-link">Skip to main content</a>
+      <a href="#main-content" className="skip-link">{t("skipToContent")}</a>
       {/* Mobile backdrop */}
       {drawerOpen && (
         <button
           type="button"
           className="sidebar-backdrop"
-          aria-label="Close menu"
+          aria-label={t("closeMenu")}
           onClick={() => setDrawerOpen(false)}
         />
       )}
@@ -205,38 +214,39 @@ export default function StudentLayout({
         {sidebar}
       </aside>
 
-      <main id="main-content" className="layout-main">
+      <main id="main-content" className="layout-main layout-main-student">
         <header className="layout-header">
           {/* Hamburger — CSS hides this on desktop */}
           <button
             type="button"
             className="btn btn-ghost btn-sm btn-icon sidebar-hamburger"
-            aria-label="Open menu"
+            aria-label={t("openMenu")}
+            title={t("openMenu")}
+            aria-expanded={drawerOpen}
             onClick={() => setDrawerOpen(true)}
           >
-            <span className="material-symbols-outlined" style={{ fontSize: 22, lineHeight: 1 }}>menu</span>
+            <span className="material-symbols-outlined" aria-hidden="true" style={{ fontSize: 22, lineHeight: 1 }}>menu</span>
           </button>
 
           {/* Title + station pill */}
           <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", flex: "1 1 auto", minWidth: 0 }}>
             <div
+              className="header-title"
               style={{
                 margin: 0,
                 fontSize: "var(--font-size-xl)",
                 fontWeight: "var(--font-bold)",
                 letterSpacing: "-0.02em",
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                lineHeight: 1,
+                lineHeight: 1.2,
               }}
               role="heading"
-              aria-level="2"
+              aria-level="1"
             >
               {pageTitle}
             </div>
-            {/* Station pill */}
+            {/* Station pill — hidden at <=768px via CSS */}
             <div
+              className="header-station-pill"
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -250,6 +260,7 @@ export default function StudentLayout({
             >
               <span
                 className="material-symbols-outlined"
+                aria-hidden="true"
                 style={{ fontSize: 13, color: "var(--green)", lineHeight: 1, fontVariationSettings: "'FILL' 1" }}
               >
                 location_on
@@ -268,8 +279,9 @@ export default function StudentLayout({
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", flexShrink: 0 }}>
-            {/* User avatar */}
+            {/* User avatar — hidden at <=768px via CSS (shown in drawer) */}
             <div
+              className="header-avatar"
               style={{
                 width: 30,
                 height: 30,
@@ -299,10 +311,19 @@ export default function StudentLayout({
                 display: "grid",
                 placeItems: "center",
               }}
-              title="Notifications"
-              aria-label="Notifications"
+              title={t("navNotifications")}
+              aria-label={t("navNotifications")}
+              aria-current={onNotifications ? "page" : undefined}
             >
-              <span className="material-symbols-outlined" style={{ fontSize: 22, color: "var(--text-secondary)" }}>
+              <span
+                className="material-symbols-outlined"
+                aria-hidden="true"
+                style={{
+                  fontSize: 22,
+                  color: onNotifications ? "var(--accent)" : "var(--text-secondary)",
+                  fontVariationSettings: onNotifications ? "'FILL' 1" : "'FILL' 0",
+                }}
+              >
                 notifications
               </span>
               {unread > 0 && (
@@ -334,8 +355,8 @@ export default function StudentLayout({
               size="sm"
               icon="refresh"
               iconOnly
-              title="Refresh"
-              aria-label="Refresh"
+              title={t("refresh")}
+              aria-label={t("refresh")}
               onClick={() => window.dispatchEvent(new CustomEvent("fleetmark:refresh"))}
             />
           </div>
@@ -357,52 +378,25 @@ export default function StudentLayout({
         >
           <span>© 2026 Fleetmark</span>
           <span>·</span>
-          <a href="/privacy" style={{ color: "var(--dim)", textDecoration: "none", fontWeight: 600 }}>Privacy</a>
+          <a href="/privacy" style={{ color: "var(--dim)", textDecoration: "none", fontWeight: 600 }}>{t("privacy")}</a>
           <span>·</span>
-          <a href="/terms" style={{ color: "var(--dim)", textDecoration: "none", fontWeight: 600 }}>Terms</a>
+          <a href="/terms" style={{ color: "var(--dim)", textDecoration: "none", fontWeight: 600 }}>{t("terms")}</a>
         </footer>
       </main>
 
       {/* ── Mobile bottom navigation ──────────── */}
       <nav className="student-bottom-nav">
-        {bottomNavItems.map((item) => {
+        {navItems.map((item) => {
           const active = isActive(item.path);
-          const isNotif = item.id === "notifications";
           return (
             <button
               key={item.id}
               type="button"
               className={`student-bottom-nav-item${active ? " active" : ""}`}
               onClick={() => handleNavigate(item.path)}
-              aria-label={t(item.labelKey)}
+              aria-current={active ? "page" : undefined}
             >
-              <span className="material-symbols-outlined" style={{ position: "relative" }}>
-                {item.icon}
-                {/* Unread badge on notification icon */}
-                {isNotif && unread > 0 && (
-                  <span
-                    className="bell-badge-pulse"
-                    style={{
-                      position: "absolute",
-                      top: -4,
-                      right: -8,
-                      minWidth: 14,
-                      height: 14,
-                      borderRadius: 7,
-                      background: "var(--red)",
-                      color: "#fff",
-                      fontSize: 9,
-                      fontWeight: 700,
-                      display: "grid",
-                      placeItems: "center",
-                      padding: "0 3px",
-                      lineHeight: 1,
-                    }}
-                  >
-                    {unread > 9 ? "9+" : unread}
-                  </span>
-                )}
-              </span>
+              <span className="material-symbols-outlined" aria-hidden="true">{item.icon}</span>
               <span className="student-bottom-nav-label">{t(item.labelKey)}</span>
             </button>
           );

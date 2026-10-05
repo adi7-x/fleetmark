@@ -1,0 +1,510 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   NOCTURNE — Landing design layer for FLEETMARK
+   A dark-native "night departure board" system.
+   Tokens are scoped to .nocturne so the rest of the app is untouched until
+   this direction is approved and promoted to the global token set.
+
+   Contrast (WCAG AA) — text on --n-bg (#0a0e17):
+     --n-ink  #eef2f8 ≈ 16.9:1   --n-mid #9aa7bd ≈ 7.4:1   --n-dim #8792a6 ≈ 5.7:1
+     --aurora #5ad1df ≈ 10.6:1   --sodium #f4b860 ≈ 10.9:1
+   Aurora/sodium buttons use near-black ink text (--n-ink-invert) → >12:1.
+   ═════════════════════════════════════════════════════════════════════ */
+
+.nocturne {
+  color-scheme: dark;
+
+  /* ── Night canvas ─────────────────────────────────────── */
+  --n-bg:        #0a0e17;
+  --n-bg-2:      #0c1220;
+  --n-surface:   #111725;
+  --n-surface-2: #161d2e;
+  --n-surface-3: #1c2436;
+  --n-line:        rgba(255, 255, 255, 0.08);
+  --n-line-strong: rgba(255, 255, 255, 0.16);
+
+  /* ── Ink ──────────────────────────────────────────────── */
+  --n-ink:        #eef2f8;
+  --n-mid:        #9aa7bd;
+  --n-dim:        #8792a6;
+  --n-ink-invert: #05121a;
+
+  /* ── Aurora (headlights) — primary interactive ────────── */
+  --aurora:       #5ad1df;
+  --aurora-deep:  #2aa7b8;
+  --aurora-soft:  rgba(90, 209, 223, 0.14);
+  --aurora-line:  rgba(90, 209, 223, 0.34);
+  --aurora-glow:  rgba(90, 209, 223, 0.30);
+
+  /* ── Sodium (streetlights) — warm accent / transition ── */
+  --sodium:      #f4b860;
+  --sodium-soft: rgba(244, 184, 96, 0.14);
+  --sodium-line: rgba(244, 184, 96, 0.34);
+
+  /* ── Status ───────────────────────────────────────────── */
+  --n-go:      #4ade80;
+  --n-go-soft: rgba(74, 222, 128, 0.14);
+  --n-danger:  #ff6b6b;
+
+  /* ── Radius / elevation ───────────────────────────────── */
+  --n-r-sm: 8px;
+  --n-r:    12px;
+  --n-r-lg: 18px;
+  --n-r-pill: 999px;
+  --n-shadow: 0 18px 50px -12px rgba(0, 0, 0, 0.7);
+  --n-shadow-glow: 0 0 0 1px var(--aurora-line), 0 12px 40px -8px var(--aurora-glow);
+
+  /* ── Motion ───────────────────────────────────────────── */
+  --n-ease:   cubic-bezier(0.22, 1, 0.36, 1);
+  --n-spring: cubic-bezier(0.16, 1, 0.3, 1); /* ease-out-expo; no overshoot */
+
+  /* ── Type ─────────────────────────────────────────────── */
+  --n-mono: "JetBrains Mono", "SFMono-Regular", Menlo, monospace;
+
+  /* ── App tokens read by shared components embedded here (LanguageSwitcher).
+        The landing is always dark, so pin them to the night palette; otherwise
+        the light theme paints a white pill onto the dark nav. ── */
+  --line:     var(--n-line-strong);
+  --surface2: var(--n-surface);
+  --mid:      var(--n-mid);
+  --blue:     var(--aurora);
+  --blue-bg:  var(--aurora-soft);
+
+  position: relative;
+  min-height: 100vh;
+  background: var(--n-bg);
+  color: var(--n-ink);
+  font-family: "Inter", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+.nocturne ::selection { background: var(--aurora-soft); color: var(--n-ink); }
+
+.nocturne :focus-visible {
+  outline: 2px solid var(--aurora);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+.noc-wrap { max-width: 1200px; margin-inline: auto; padding-inline: 32px; width: 100%; }
+.noc-mono { font-family: var(--n-mono); font-feature-settings: "tnum" 1; }
+
+/* ══════════════════════ NAV ══════════════════════ */
+.noc-nav {
+  position: fixed; inset-block-start: 0; inset-inline: 0; z-index: 50;
+  background: color-mix(in srgb, var(--n-bg) 72%, transparent);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  border-block-end: 1px solid var(--n-line);
+}
+.noc-nav::after {
+  content: ""; position: absolute; inset-block-end: -1px; inset-inline: 0; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--aurora-line), transparent);
+  opacity: 0.7;
+}
+.noc-nav__inner { height: 60px; display: flex; align-items: center; justify-content: space-between; }
+.noc-nav__left { display: flex; align-items: center; gap: 34px; }
+.noc-brand {
+  display: inline-flex; align-items: center; gap: 10px;
+  font-size: 20px; font-weight: 800; letter-spacing: -0.03em; color: var(--n-ink);
+}
+.noc-brand__mark {
+  width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center;
+  background: linear-gradient(140deg, var(--aurora), var(--aurora-deep));
+  color: var(--n-ink-invert); box-shadow: 0 0 18px var(--aurora-glow);
+}
+.noc-brand__mark svg { display: block; }
+.noc-nav__links { display: flex; gap: 26px; font-size: 14px; }
+.noc-nav__links a { color: var(--n-mid); position: relative; padding-block: 4px; transition: color 0.2s var(--n-ease); }
+.noc-nav__links a::after {
+  content: ""; position: absolute; inset-block-end: 0; inset-inline-start: 0; width: 100%; height: 1.5px;
+  background: var(--aurora); transform: scaleX(0); transform-origin: left; transition: transform 0.25s var(--n-ease);
+}
+.noc-nav__links a:hover { color: var(--n-ink); }
+.noc-nav__links a:hover::after, .noc-nav__links a:focus-visible::after { transform: scaleX(1); }
+.noc-nav__right { display: flex; align-items: center; gap: 10px; }
+.noc-lang { display: flex; }
+
+/* ══════════════════════ BUTTONS ══════════════════════ */
+.noc-btn {
+  font: inherit; font-weight: 700; cursor: pointer; border-radius: var(--n-r-sm);
+  padding: 13px 22px; display: inline-flex; align-items: center; gap: 8px;
+  border: 1px solid transparent; transition: transform 0.18s var(--n-spring), box-shadow 0.2s var(--n-ease), background 0.2s var(--n-ease), border-color 0.2s var(--n-ease);
+  white-space: nowrap;
+}
+.noc-btn--sm { padding: 8px 15px; font-size: 14px; }
+.noc-btn--primary {
+  background: linear-gradient(140deg, var(--aurora), var(--aurora-deep));
+  color: var(--n-ink-invert); box-shadow: 0 6px 22px -6px var(--aurora-glow);
+}
+.noc-btn--primary:hover { transform: translateY(-2px); box-shadow: 0 12px 30px -8px var(--aurora-glow); }
+.noc-btn--primary:active { transform: translateY(0); }
+.noc-btn--ghost {
+  background: color-mix(in srgb, var(--n-surface) 70%, transparent);
+  border-color: var(--n-line-strong); color: var(--n-ink);
+}
+.noc-btn--ghost:hover { transform: translateY(-2px); border-color: var(--aurora-line); background: var(--n-surface-2); }
+.noc-btn--outline {
+  background: var(--aurora-soft); border-color: var(--aurora-line); color: var(--aurora);
+}
+.noc-btn--outline:hover { transform: translateY(-2px); background: color-mix(in srgb, var(--aurora) 18%, transparent); }
+.noc-btn--block { width: 100%; justify-content: center; }
+
+.noc-hamburger {
+  display: none; place-items: center; width: 42px; height: 42px; border-radius: 10px;
+  border: 1px solid var(--n-line-strong); background: var(--n-surface); color: var(--n-ink); cursor: pointer;
+}
+
+/* ══════════════════════ HERO ══════════════════════ */
+.noc-hero {
+  position: relative; min-height: min(100vh, 920px); display: grid; place-items: center;
+  text-align: center; padding-block: 132px 88px; overflow: hidden;
+}
+.noc-hero__bg { position: absolute; inset: 0; pointer-events: none; z-index: 0; }
+/* starfield: two drifting layers of tiny dots (cheap, transform-only) */
+.noc-stars, .noc-stars--2 {
+  position: absolute; inset: -20% 0; opacity: 0.5;
+  background-image:
+    radial-gradient(1.5px 1.5px at 20% 30%, rgba(255,255,255,0.7), transparent),
+    radial-gradient(1.5px 1.5px at 70% 60%, rgba(255,255,255,0.5), transparent),
+    radial-gradient(1px 1px at 40% 80%, rgba(255,255,255,0.6), transparent),
+    radial-gradient(1px 1px at 85% 20%, rgba(255,255,255,0.5), transparent),
+    radial-gradient(1.5px 1.5px at 55% 15%, rgba(90,209,223,0.6), transparent),
+    radial-gradient(1px 1px at 10% 70%, rgba(255,255,255,0.5), transparent);
+  background-size: 420px 420px;
+  animation: noc-drift 90s linear infinite;
+}
+.noc-stars--2 { background-size: 620px 620px; opacity: 0.3; animation-duration: 140s; animation-direction: reverse; }
+/* headlight sweep: soft radial light, drifts horizontally (no blur filter) */
+.noc-headlights {
+  position: absolute; inset-block: -30% -10%; inset-inline-start: -20%; width: 70%;
+  background: radial-gradient(50% 50% at 50% 50%, var(--aurora-glow), transparent 70%);
+  opacity: 0.5; animation: noc-sweep 22s ease-in-out infinite alternate;
+}
+.noc-headlights--warm {
+  inset-inline-start: auto; inset-inline-end: -24%; width: 60%;
+  background: radial-gradient(50% 50% at 50% 50%, rgba(244,184,96,0.16), transparent 70%);
+  animation-duration: 28s; animation-delay: -6s;
+}
+/* horizon grid — subtle, fades toward top */
+.noc-hero__grid {
+  position: absolute; inset-block-end: 0; inset-inline: 0; height: 55%;
+  background-image:
+    linear-gradient(to right, rgba(255,255,255,0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255,255,255,0.04) 1px, transparent 1px);
+  background-size: 46px 46px;
+  -webkit-mask-image: linear-gradient(to top, #000 0%, transparent 100%);
+  mask-image: linear-gradient(to top, #000 0%, transparent 100%);
+}
+
+.noc-hero__inner { position: relative; z-index: 1; width: 100%; }
+
+/* OAuth error (?auth_error=…) — sits above the status pill, same width as the board */
+.noc-alert {
+  display: flex; align-items: flex-start; gap: 10px; text-align: start;
+  max-width: 560px; margin: 0 auto 22px; padding: 12px 16px;
+  background: color-mix(in srgb, var(--n-danger) 9%, var(--n-surface));
+  border: 1px solid color-mix(in srgb, var(--n-danger) 38%, transparent);
+  border-radius: var(--n-r); box-shadow: var(--n-shadow);
+}
+.noc-alert .material-symbols-outlined { color: var(--n-danger); font-size: 20px; flex-shrink: 0; font-variation-settings: "FILL" 1; }
+.noc-alert p { margin: 0; color: var(--n-ink); font-size: 14px; line-height: 1.45; }
+.noc-rise { opacity: 0; transform: translateY(22px); animation: noc-rise 0.7s var(--n-ease) forwards; }
+.noc-rise-1 { animation-delay: 0.05s; }
+.noc-rise-2 { animation-delay: 0.14s; }
+.noc-rise-3 { animation-delay: 0.24s; }
+.noc-rise-4 { animation-delay: 0.34s; }
+.noc-rise-5 { animation-delay: 0.44s; }
+
+.noc-status {
+  display: inline-flex; align-items: center; gap: 9px;
+  border: 1px solid var(--n-go-soft); background: color-mix(in srgb, var(--n-go) 8%, transparent);
+  color: var(--n-go); border-radius: var(--n-r-pill); padding: 7px 15px;
+  font-family: var(--n-mono); font-size: 12px; font-weight: 700; letter-spacing: 0.02em;
+}
+.noc-status__dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--n-go);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--n-go) 55%, transparent);
+  animation: noc-pulse 2.4s ease-out infinite;
+}
+.noc-eyebrow {
+  font-family: var(--n-mono); font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.18em; color: var(--aurora); display: block;
+}
+
+.noc-h1 {
+  margin: 22px 0 0; font-size: clamp(2.6rem, 8vw, 5.4rem); line-height: 1.02;
+  letter-spacing: -0.045em; font-weight: 800;
+}
+.noc-h1 .accent {
+  background: linear-gradient(120deg, var(--aurora), var(--sodium));
+  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+}
+.noc-lede { max-width: 588px; margin: 22px auto 0; color: var(--n-mid); font-size: clamp(1rem, 2.2vw, 1.18rem); line-height: 1.6; }
+.noc-cta-row { margin-top: 30px; display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+
+/* ── Departure board (hero centerpiece) ── */
+.noc-board {
+  margin: 44px auto 0; max-width: 560px; width: 100%; text-align: start;
+  background: linear-gradient(180deg, var(--n-surface), var(--n-bg-2));
+  border: 1px solid var(--n-line-strong); border-radius: var(--n-r-lg);
+  box-shadow: var(--n-shadow); overflow: hidden;
+}
+.noc-board__head {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px;
+  padding: 13px 18px; border-block-end: 1px solid var(--n-line);
+  background: color-mix(in srgb, var(--aurora) 5%, transparent);
+}
+.noc-board__title { font-family: var(--n-mono); font-size: 12px; font-weight: 700; letter-spacing: 0.14em; color: var(--n-mid); text-transform: uppercase; }
+/* margin-inline-start: auto keeps the badge right-aligned when a long (FR) title pushes it to its own line */
+.noc-board__live { display: inline-flex; align-items: center; gap: 6px; margin-inline-start: auto; white-space: nowrap; font-family: var(--n-mono); font-size: 11px; font-weight: 700; color: var(--aurora); }
+.noc-board__row {
+  display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 16px;
+  padding: 14px 18px; border-block-end: 1px solid var(--n-line);
+  opacity: 0; animation: noc-flip 0.5s var(--n-ease) forwards;
+}
+.noc-board__row:last-child { border-block-end: none; }
+.noc-board__row:nth-child(1) { animation-delay: 0.5s; }
+.noc-board__row:nth-child(2) { animation-delay: 0.62s; }
+.noc-board__row:nth-child(3) { animation-delay: 0.74s; }
+.noc-board__row:nth-child(4) { animation-delay: 0.86s; }
+.noc-board__time { font-family: var(--n-mono); font-size: 18px; font-weight: 700; color: var(--n-ink); letter-spacing: -0.02em; }
+.noc-board__route { min-width: 0; }
+.noc-board__route b { display: block; font-size: 14px; font-weight: 600; color: var(--n-ink); }
+.noc-board__route span { font-family: var(--n-mono); font-size: 11px; color: var(--n-dim); letter-spacing: 0.04em; }
+.noc-chip {
+  font-family: var(--n-mono); font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em;
+  padding: 5px 10px; border-radius: var(--n-r-pill); text-transform: uppercase; white-space: nowrap;
+}
+.noc-chip--reserved { background: var(--aurora-soft); color: var(--aurora); border: 1px solid var(--aurora-line); }
+.noc-chip--boarding { background: var(--sodium-soft); color: var(--sodium); border: 1px solid var(--sodium-line); }
+.noc-chip--open { background: var(--n-go-soft); color: var(--n-go); border: 1px solid color-mix(in srgb, var(--n-go) 30%, transparent); }
+.noc-chip--late { background: var(--n-surface-2); color: var(--n-mid); border: 1px solid var(--n-line-strong); }
+
+/* ── Stat cluster ── */
+.noc-stats {
+  margin: 30px auto 0; display: inline-flex; flex-wrap: wrap; justify-content: center;
+  border: 1px solid var(--n-line); border-radius: var(--n-r-pill);
+  background: color-mix(in srgb, var(--n-surface) 80%, transparent); padding: 6px 8px; max-width: 100%;
+}
+.noc-stat { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 12px clamp(16px, 3vw, 30px); min-width: 76px; }
+.noc-stat + .noc-stat { border-inline-start: 1px solid var(--n-line); }
+.noc-stat b { font-family: var(--n-mono); font-size: clamp(18px, 2.4vw, 24px); font-weight: 700; color: var(--n-ink); letter-spacing: -0.02em; }
+.noc-stat span { font-family: var(--n-mono); font-size: 10px; font-weight: 700; color: var(--n-dim); text-transform: uppercase; letter-spacing: 0.14em; }
+
+/* ══════════════════════ SECTIONS ══════════════════════ */
+/* scroll-margin keeps the eyebrow clear of the fixed 60px nav after a menu jump */
+.noc-section { padding-block: 104px; position: relative; scroll-margin-top: 60px; }
+.noc-section--line { border-block-start: 1px solid var(--n-line); }
+.noc-h2 { font-size: clamp(1.9rem, 4.4vw, 2.7rem); margin: 16px 0 0; letter-spacing: -0.025em; font-weight: 800; line-height: 1.1; text-wrap: balance; }
+.noc-sub { margin: 16px 0 0; color: var(--n-mid); font-size: 1rem; line-height: 1.6; max-width: 560px; }
+.noc-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 64px; align-items: start; }
+
+/* ── How it works ── */
+.noc-steps { display: grid; gap: 34px; margin-top: 40px; }
+.noc-step { display: flex; gap: 22px; }
+.noc-step__num {
+  flex-shrink: 0; width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center;
+  font-family: var(--n-mono); font-size: 15px; font-weight: 700; color: var(--aurora);
+  background: var(--aurora-soft); border: 1px solid var(--aurora-line);
+}
+.noc-step h3 { margin: 6px 0 8px; font-size: 18px; font-weight: 700; }
+.noc-step p { color: var(--n-mid); font-size: 14px; line-height: 1.6; margin: 0; }
+
+/* ── Boarding pass (mockup) ── */
+.noc-pass {
+  position: relative; border-radius: var(--n-r-lg); background: var(--n-surface);
+  border: 1px solid var(--n-line-strong); box-shadow: var(--n-shadow); overflow: hidden;
+}
+.noc-pass::before {
+  content: ""; position: absolute; inset-block-start: 0; inset-inline: 0; height: 3px;
+  background: linear-gradient(90deg, var(--aurora), var(--sodium));
+}
+.noc-pass__head { padding: 22px 24px 0; }
+.noc-pass__brand { font-family: var(--n-mono); font-size: 11px; letter-spacing: 0.16em; color: var(--n-dim); text-transform: uppercase; }
+.noc-pass__route { font-size: 19px; font-weight: 800; margin-top: 8px; }
+.noc-pass__path { font-family: var(--n-mono); font-size: 12px; color: var(--n-mid); margin-top: 4px; }
+.noc-pass__grid { display: flex; gap: 10px; padding: 20px 24px 0; }
+.noc-pass__cell { flex: 1; background: var(--n-surface-2); border: 1px solid var(--n-line); border-radius: 10px; padding: 12px 8px; text-align: center; }
+.noc-pass__cell .material-symbols-outlined { font-size: 18px; color: var(--aurora); }
+.noc-pass__cell b { display: block; font-family: var(--n-mono); font-size: 13px; font-weight: 700; margin-top: 4px; }
+.noc-pass__tear {
+  position: relative; margin: 20px 0; border-block-start: 1.5px dashed var(--n-line-strong);
+}
+.noc-pass__tear::before, .noc-pass__tear::after {
+  content: ""; position: absolute; inset-block-start: -11px; width: 22px; height: 22px; border-radius: 50%; background: var(--n-bg);
+}
+.noc-pass__tear::before { inset-inline-start: -11px; }
+.noc-pass__tear::after { inset-inline-end: -11px; }
+.noc-pass__foot { padding: 0 24px 24px; }
+.noc-pass__confirm {
+  display: flex; align-items: center; gap: 10px; background: var(--n-go-soft);
+  border: 1px solid color-mix(in srgb, var(--n-go) 30%, transparent); border-radius: 10px; padding: 11px 14px;
+  color: var(--n-go); font-size: 13px; font-weight: 600;
+}
+.noc-pass__confirm .material-symbols-outlined { font-size: 20px; font-variation-settings: "FILL" 1; }
+
+/* ── Schedule timeline ── */
+.noc-timeline { margin-top: 44px; }
+.noc-timeline__track {
+  position: relative; height: 8px; border-radius: var(--n-r-pill); overflow: hidden;
+  display: flex; border: 1px solid var(--n-line);
+}
+.noc-timeline__seg { height: 100%; }
+.noc-timeline__labels { display: flex; justify-content: space-between; margin-top: 10px; font-family: var(--n-mono); font-size: 11px; color: var(--n-dim); letter-spacing: 0.04em; }
+.noc-sched-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; margin-top: 32px; }
+.noc-sched-card { border: 1px solid var(--n-line); border-radius: var(--n-r); background: var(--n-surface); padding: 22px; transition: transform 0.2s var(--n-ease), border-color 0.2s var(--n-ease); }
+.noc-sched-card:hover { transform: translateY(-3px); border-color: var(--n-line-strong); }
+.noc-sched-card__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.noc-sched-card__label { font-family: var(--n-mono); font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
+.noc-sched-card__time { font-family: var(--n-mono); font-size: 20px; font-weight: 700; margin-bottom: 10px; }
+.noc-sched-card h3 { font-size: 16px; font-weight: 700; margin: 0 0 8px; line-height: 1.3; }
+.noc-sched-card p { color: var(--n-mid); font-size: 13.5px; line-height: 1.55; margin: 0 0 14px; }
+.noc-tags { display: flex; flex-wrap: wrap; gap: 8px; }
+.noc-tag { font-family: var(--n-mono); font-size: 11px; padding: 5px 10px; border-radius: 6px; background: var(--n-surface-2); border: 1px solid var(--n-line); color: var(--n-mid); }
+
+/* ── Team ── five cards: 5 across on desktop, 3 + 2 centred on tablets, list on phones
+   (auto-fit left a lone card or an empty cell at most widths between 600 and 1100px) ── */
+.noc-team-scroll { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 20px; margin-top: 40px; }
+.noc-teamcard {
+  position: relative; min-width: 0;
+  border-radius: var(--n-r); background: var(--n-surface); border: 1px solid var(--n-line);
+  padding: 28px 24px; transition: transform 0.2s var(--n-ease), border-color 0.2s var(--n-ease);
+  overflow: hidden;
+}
+.noc-teamcard::before { content: ""; position: absolute; inset-block-start: 0; inset-inline: 0; height: 3px; background: linear-gradient(90deg, var(--aurora), transparent); }
+.noc-teamcard:hover { transform: translateY(-4px); border-color: var(--aurora-line); }
+.noc-avatar {
+  width: 60px; height: 60px; border-radius: 16px; display: grid; place-items: center;
+  font-size: 20px; font-weight: 800; color: var(--n-ink-invert); letter-spacing: -0.02em;
+  background: linear-gradient(140deg, var(--aurora), var(--aurora-deep));
+}
+.noc-teamcard--sodium .noc-avatar { background: linear-gradient(140deg, var(--sodium), #c98a2e); }
+.noc-teamcard h4 { margin: 20px 0 6px; font-size: 18px; font-weight: 800; }
+.noc-teamcard__role { color: var(--aurora); font-size: 13px; font-weight: 600; margin: 0; }
+.noc-teamcard__skills { font-family: var(--n-mono); color: var(--n-dim); font-size: 11px; line-height: 1.5; margin: 12px 0 0; }
+.noc-teamcard__skills span { white-space: nowrap; }
+
+/* ── Access card (get started) ── */
+.noc-access {
+  border-radius: var(--n-r-lg); padding: 1px;
+  background: linear-gradient(140deg, var(--aurora-line), var(--sodium-line));
+  box-shadow: var(--n-shadow);
+}
+.noc-access__inner { background: var(--n-surface); border-radius: calc(var(--n-r-lg) - 1px); padding: 34px; }
+.noc-access__badge {
+  width: 50px; height: 50px; border-radius: 12px; display: grid; place-items: center;
+  font-weight: 800; font-size: 20px; margin-bottom: 20px;
+  background: var(--aurora-soft); color: var(--aurora); border: 1px solid var(--aurora-line);
+}
+.noc-access h3 { font-size: 21px; font-weight: 800; margin: 0; }
+.noc-access p { color: var(--n-mid); margin-top: 10px; font-size: 14px; line-height: 1.55; }
+.noc-access__secured { font-family: var(--n-mono); font-size: 11px; color: var(--n-dim); text-align: center; margin-top: 12px; }
+.noc-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+.noc-chips span { font-size: 11px; font-weight: 600; padding: 6px 12px; border-radius: var(--n-r-pill); background: var(--n-surface-2); border: 1px solid var(--n-line); color: var(--n-mid); }
+.noc-access__foot { font-family: var(--n-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--n-dim); text-align: center; margin-top: 22px; }
+
+.noc-list { margin: 40px 0 0; padding: 0; list-style: none; display: grid; gap: 18px; }
+.noc-list li { display: flex; gap: 14px; align-items: flex-start; }
+.noc-list__num { flex-shrink: 0; width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--aurora-line); color: var(--aurora); display: grid; place-items: center; font-family: var(--n-mono); font-size: 11px; }
+.noc-list li span:last-child { color: var(--n-mid); font-size: 15px; line-height: 1.55; }
+
+/* ══════════════════════ FOOTER ══════════════════════ */
+.noc-footer { border-block-start: 1px solid var(--n-line); }
+.noc-footer__inner { padding-block: 44px; display: flex; flex-direction: column; gap: 16px; }
+.noc-footer__top { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; flex-wrap: wrap; }
+.noc-footer__brand { font-size: 22px; font-weight: 800; letter-spacing: -0.03em; }
+.noc-footer__meta { font-family: var(--n-mono); font-size: 11px; color: var(--n-dim); letter-spacing: 0.05em; }
+/* space-between parks the legal links on the right, so they don't read as part of the tech list */
+.noc-footer__links { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.noc-footer__legal { display: flex; flex-wrap: wrap; column-gap: 20px; }
+.noc-footer__legal a { display: inline-flex; align-items: center; min-height: 40px; font-size: 12px; color: var(--n-mid); font-weight: 600; }
+.noc-footer__legal a:hover { color: var(--n-ink); }
+
+/* ══════════════════════ MOBILE MENU ══════════════════════ */
+.noc-mobile-menu {
+  display: none; position: fixed; inset: 60px 0 0; z-index: 45;
+  background: color-mix(in srgb, var(--n-bg) 97%, transparent);
+  backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+  padding: 24px 32px; flex-direction: column; gap: 6px;
+}
+.noc-mobile-menu.open { display: flex; }
+.noc-mobile-menu a, .noc-mobile-menu button {
+  display: block; width: 100%; text-align: start; padding: 15px 16px; border-radius: 10px;
+  font-size: 16px; font-weight: 600; color: var(--n-ink); border: none; background: transparent; cursor: pointer;
+}
+.noc-mobile-menu a:hover, .noc-mobile-menu button:hover { background: var(--n-surface-2); }
+.noc-mobile-menu button {
+  margin-top: 12px; text-align: center; color: var(--aurora);
+  background: var(--aurora-soft); border: 1px solid var(--aurora-line);
+}
+.noc-mobile-menu button:hover { background: color-mix(in srgb, var(--aurora) 18%, transparent); }
+
+/* ══════════════════════ KEYFRAMES ══════════════════════ */
+@keyframes noc-rise { to { opacity: 1; transform: translateY(0); } }
+@keyframes noc-flip { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes noc-drift { from { transform: translateY(0); } to { transform: translateY(-80px); } }
+@keyframes noc-sweep { from { transform: translateX(-10%); } to { transform: translateX(60%); } }
+@keyframes noc-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 45%, transparent); }
+  70%, 100% { box-shadow: 0 0 0 8px transparent; }
+}
+
+/* ══════════════════════ RESPONSIVE ══════════════════════ */
+@media (max-width: 1100px) {
+  /* 3 + 2, the second row centred */
+  .noc-team-scroll { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .noc-teamcard { grid-column: span 2; }
+  .noc-teamcard:nth-child(4) { grid-column: 2 / span 2; }
+}
+@media (max-width: 900px) {
+  .noc-grid-2 { grid-template-columns: 1fr; gap: 40px; }
+  .noc-sched-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 768px) {
+  .noc-wrap { padding-inline: 20px; }
+  .noc-nav__links { display: none; }
+  .noc-hamburger { display: grid; }
+  .noc-nav__right .noc-btn--outline { display: none; } /* sign-in lives in the hamburger menu on mobile */
+  .noc-nav__theme { display: none; } /* landing is always dark; declutter the mobile nav */
+  .noc-section { padding-block: 72px; }
+  .noc-hero { padding-block: 116px 64px; }
+  .noc-mobile-menu { padding-inline: 20px; }
+  /* LanguageSwitcher buttons are ~27px tall; give them a 40px tap target (legal pages reuse .noc-lang) */
+  .noc-lang button { min-width: 40px; min-height: 40px; }
+}
+@media (max-width: 640px) {
+  /* team becomes a list: avatar left, details right */
+  .noc-team-scroll { grid-template-columns: minmax(0, 1fr); gap: 12px; margin-top: 32px; }
+  .noc-teamcard, .noc-teamcard:nth-child(4) {
+    grid-column: auto; display: grid; grid-template-columns: 52px minmax(0, 1fr);
+    column-gap: 16px; align-items: center; padding: 18px;
+  }
+  .noc-teamcard .noc-avatar { grid-row: span 3; width: 52px; height: 52px; border-radius: 14px; font-size: 17px; align-self: start; }
+  .noc-teamcard h4 { margin: 0 0 2px; font-size: 17px; }
+  .noc-teamcard__skills { margin-top: 6px; }
+  /* stats: 2 × 2 tiles instead of a pill that wraps 3 + 1 */
+  .noc-stats { display: grid; grid-template-columns: 1fr 1fr; border-radius: var(--n-r-lg); padding: 4px; width: 100%; }
+  .noc-stat + .noc-stat { border-inline-start: none; }
+  .noc-stat:nth-child(even) { border-inline-start: 1px solid var(--n-line); }
+  .noc-stat:nth-child(n + 3) { border-block-start: 1px solid var(--n-line); }
+  /* hero CTAs: same full width when stacked, instead of two ragged buttons */
+  .noc-cta-row .noc-btn { flex: 1 1 220px; justify-content: center; }
+  .noc-access__inner { padding: 26px 22px; }
+  .noc-access__foot { letter-spacing: 0.05em; }
+  .noc-board__row { gap: 12px; padding-inline: 14px; }
+  .noc-board__head { padding-inline: 14px; }
+}
+
+/* ══════════════════════ REDUCED MOTION ══════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  .nocturne *,
+  .nocturne *::before,
+  .nocturne *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .noc-rise, .noc-board__row { opacity: 1 !important; transform: none !important; }
+}
+

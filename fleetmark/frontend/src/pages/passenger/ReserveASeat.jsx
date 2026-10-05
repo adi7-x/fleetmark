@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import SuccessCheckmark from "../../components/ui/SuccessCheckmark";
-import AdminEmptyState from "../../components/ui/AdminEmptyState";
-import { API_BASE, getUser } from "../../services/api";
+import EmptyState from "../../components/ui/EmptyState";
+import { API_BASE, getUser, getAccessToken, authFetch, errorMessage } from "../../services/api";
+import { fmtTime, inTonightWindow } from "../../utils/datetime";
 import ReportModal from "../../components/ui/ReportModal";
 import { useTranslation } from "../../context/TranslationContext";
 
@@ -47,12 +48,15 @@ export default function ReserveASeat() {
   const { t } = useTranslation();
   const [user, setUser] = useState(() => getUser());
   const [trips, setTrips] = useState([]);
-  const [buses, setBuses] = useState([]);
   const [reservedTripIds, setReservedTripIds] = useState([]);
+  // Tonight's booking comes from /reservations/, not the trip list: the list
+  // drops full and departed trips, which would unlock the other trips.
+  const [bookedTrip, setBookedTrip] = useState(null);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState("");
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
+  const [reportSent, setReportSent] = useState(false);
   /** null | 'check' (1.5s SVG) | 'toast' — Fix 1e */
   const [successPhase, setSuccessPhase] = useState(null);
   const [reportingTrip, setReportingTrip] = useState(null);
@@ -61,26 +65,27 @@ export default function ReserveASeat() {
     try {
       setLoading(true);
       setError("");
-      const token = localStorage.getItem("fleetmark_access");
+      const token = getAccessToken();
       if (!token) throw new Error("Not authenticated.");
 
-      const headers = { Authorization: `Bearer ${token}`, "X-API-Key": import.meta.env.VITE_API_KEY };
+      const headers = { Authorization: `Bearer ${token}` };
 
       const fetchWithTimeout = async (url, opts = {}) => {
         const controller = new AbortController();
         const id = setTimeout(() => controller.abort(), 5000);
         try {
-          const r = await fetch(url, { ...opts, headers, signal: controller.signal });
+          const r = await authFetch(url, { ...opts, headers, signal: controller.signal });
           clearTimeout(id);
-          return r.ok ? r.json() : [];
-        } catch {
+          if (!r.ok) throw new Error(await errorMessage(r, t("couldntLoad")));
+          return r.json();
+        } catch (err) {
           clearTimeout(id);
-          return [];
+          throw err.name === "AbortError" ? new Error(t("couldntLoad")) : err;
         }
       };
 
       // Fetch fresh profile with timeout — never blocks if API is slow
-      const meData = await fetchWithTimeout(`${API_BASE}/auth/me/`);
+      const meData = await fetchWithTimeout(`${API_BASE}/auth/me/`).catch(() => null);
       let activeUser = getUser();
       if (meData && meData.id) {
         localStorage.setItem("fleetmark_user", JSON.stringify(meData));
@@ -93,20 +98,22 @@ export default function ReserveASeat() {
         return;
       }
 
-      const [tData, rData, bData] = await Promise.all([
+      const [tData, rData, hData] = await Promise.all([
         fetchWithTimeout(`${API_BASE}/trips/available/?station_id=${encodeURIComponent(activeUser.station)}`),
-        fetchWithTimeout(`${API_BASE}/reservations/?user_id=${encodeURIComponent(activeUser.id)}`),
-        fetchWithTimeout(`${API_BASE}/buses/`),
+        fetchWithTimeout(`${API_BASE}/reservations/`),
+        // A trip archived after departure still uses tonight's one seat.
+        fetchWithTimeout(`${API_BASE}/reservations/history/`),
       ]);
       setTrips(Array.isArray(tData) ? tData : []);
-      setBuses(Array.isArray(bData) ? bData : []);
-      setReservedTripIds((Array.isArray(rData) ? rData : []).map((item) => item.trip_details?.id || item.trip));
+      const mine = Array.isArray(rData) ? rData : [];
+      setReservedTripIds(mine.map((item) => item.trip_details?.id || item.trip));
+      setBookedTrip([...mine, ...(Array.isArray(hData) ? hData : [])].map((item) => item.trip_details).find((tr) => tr && inTonightWindow(tr.departure_datetime)) || null);
     } catch (err) {
       setError(err.message || "Unable to load trips.");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     load();
@@ -123,17 +130,20 @@ export default function ReserveASeat() {
     setToast("");
     setSuccessPhase(null);
     try {
-      const token = localStorage.getItem("fleetmark_access");
-      const res = await fetch(`${API_BASE}/reservations/`, {
+      const token = getAccessToken();
+      const res = await authFetch(`${API_BASE}/reservations/`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`, "X-API-Key": import.meta.env.VITE_API_KEY,
+          Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ trip: tripId, user_id: user.id }),
+        body: JSON.stringify({ trip: tripId }),
       });
-      if (!res.ok) throw new Error("Reservation failed.");
+      // e.g. "You already have a reservation for this day." — say why.
+      if (!res.ok) throw new Error(await errorMessage(res, t("reservationFailed")));
       setReservedTripIds((prev) => [...new Set([...prev, tripId])]);
+      setTrips((prev) => prev.map((tr) => (tr.id === tripId ? { ...tr, seats_left: Math.max(0, (tr.seats_left ?? 1) - 1) } : tr)));
+      setBookedTrip(trips.find((tr) => tr.id === tripId) || null);
       setSuccessPhase("check");
       setTimeout(() => {
         setSuccessPhase("toast");
@@ -144,7 +154,7 @@ export default function ReserveASeat() {
         }, 2200);
       }, 1500);
     } catch (err) {
-      setError(err.message || "Unable to reserve this trip.");
+      setError(err.message || t("reservationFailed"));
     } finally {
       setSavingId("");
     }
@@ -190,7 +200,15 @@ export default function ReserveASeat() {
     </div>
   );
 
-  if (error && !trips.length) return <AdminEmptyState variant="trips" onAction={() => window.location.reload()} />;
+  if (error && !trips.length) {
+    return (
+      <div className="animate-in" style={{ display: "grid", gap: 12, justifyItems: "center" }}>
+        <EmptyState icon="cloud_off" title={t("couldntLoad")} subtitle={error} />
+        <button type="button" onClick={load} className="student-quick-action">{t("tryAgain")}</button>
+      </div>
+    );
+  }
+
 
   return (
     <div className="animate-in" style={{ display: "grid", gap: "var(--space-4)" }}>
@@ -200,7 +218,8 @@ export default function ReserveASeat() {
           onClose={() => setReportingTrip(null)} 
           onExpectedSuccess={() => {
             setReportingTrip(null);
-            alert("Report submitted successfully.");
+            setReportSent(true);
+            setTimeout(() => setReportSent(false), 4000);
           }} 
         />
       )}
@@ -212,7 +231,7 @@ export default function ReserveASeat() {
           style={{
             position: "fixed",
             inset: 0,
-            zIndex: 100,
+            zIndex: 1000,
             display: "grid",
             placeItems: "center",
             background: "color-mix(in srgb, var(--bg) 75%, transparent)",
@@ -246,6 +265,8 @@ export default function ReserveASeat() {
         <button
           type="button"
           onClick={load}
+          aria-label={t("refresh")}
+          title={t("refresh")}
           style={{
             border: "1px solid var(--line2)",
             background: "var(--surface)",
@@ -279,19 +300,38 @@ export default function ReserveASeat() {
           <p style={{ margin: 0, fontWeight: 700, color: "var(--ink)", fontSize: 15 }}>{t("seatReserved")}</p>
         </div>
       ) : null}
-      {error ? <div style={{ color: "var(--red)" }}>{error}</div> : null}
+      {reportSent ? (
+        <div role="status" className="animate-in" style={{ border: "1px solid color-mix(in srgb, var(--green) 30%, transparent)", background: "var(--surface)", borderRadius: "var(--radius-md)", padding: "12px 16px", color: "var(--green)", fontWeight: 600, fontSize: 14 }}>
+          {t("reportSent")}
+        </div>
+      ) : null}
+      {error ? (
+        <div role="alert" style={{ border: "1px solid color-mix(in srgb, var(--red) 30%, transparent)", background: "var(--red-bg)", color: "var(--red)", borderRadius: "var(--radius-md)", padding: "12px 16px", fontSize: 14, fontWeight: 600 }}>
+          {error}
+        </div>
+      ) : null}
+      {bookedTrip ? (
+        <div style={{ border: "1px solid var(--blue-bdr)", background: "var(--blue-bg)", borderRadius: "var(--radius-md)", padding: "12px 16px", fontSize: 14, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <span className="material-symbols-outlined" style={{ color: "var(--blue)", fontSize: 20 }}>confirmation_number</span>
+          <span style={{ flex: 1, minWidth: 200 }}>
+            {t(new Date(bookedTrip.departure_datetime) < new Date() ? "bookedTonightDeparted" : "bookedTonightBanner").replace("{{route}}", bookedTrip.route_name).replace("{{time}}", fmtTime(bookedTrip.departure_datetime))}
+          </span>
+          <button type="button" onClick={() => navigate("/passenger/history")} style={{ border: "none", background: "transparent", color: "var(--blue)", fontWeight: 700, cursor: "pointer" }}>
+            {t("quickMyTrips")} →
+          </button>
+        </div>
+      ) : null}
 
       {!trips.length ? (
-        <AdminEmptyState variant="trips" onAction={() => (window.location.href = "/passenger/settings")} />
+        <EmptyState icon="nightlight" title={t("noTripsTonightTitle")} subtitle={t("noTripsTonightDesc")} />
       ) : (
         trips.map((trip, idx) => {
           const alreadyReserved = reservedTripIds.includes(trip.id);
           const isFull = typeof trip.seats_left === "number" && trip.seats_left <= 0;
-          const state = alreadyReserved ? t("reserved") : isFull ? t("full") : t("reserveArrow");
-          const cap = Number(buses.find((bus) => bus.id === trip.bus)?.seat_capacity ?? trip.bus_seat_capacity ?? 0);
+          const lockedByOtherBooking = !!bookedTrip && !alreadyReserved;
+          const state = alreadyReserved ? `${t("reserved")} ✓` : isFull ? t("full") : lockedByOtherBooking ? t("oneSeatPerNight") : t("reserveArrow");
+          const cap = Number(trip.bus_seat_capacity ?? 0);
           const left = Number(trip.seats_left ?? 0);
-          const hour = new Date(trip.departure_datetime).getHours();
-          const isPeak = hour === 21 || hour === 22 || hour === 1;
 
           return (
             <article
@@ -306,21 +346,15 @@ export default function ReserveASeat() {
                 justifyContent: "space-between",
                 alignItems: "center",
                 gap: "var(--space-4)",
-                animationDelay: `${idx * 0.05}s`,
-                animationFillMode: "both"
+                animationDelay: `${idx * 0.05}s`
               }}
             >
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                  <h3 style={{ margin: 0, fontSize: 16 }}>{trip.route_name || "Shuttle Trip"}</h3>
-                  {isPeak ? (
-                    <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "color-mix(in srgb, var(--amber) 15%, transparent)", color: "var(--amber)", border: "1px solid color-mix(in srgb, var(--amber) 40%, transparent)", textTransform: "uppercase" }}>{t("peakHour")}</span>
-                  ) : (
-                    <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "var(--surface2)", color: "var(--dim)", border: "1px solid var(--line2)", textTransform: "uppercase" }}>{t("normalHour")}</span>
-                  )}
+                  <h3 style={{ margin: 0, fontSize: 16 }}>{trip.route_name}</h3>
                 </div>
                 <p className="mono" style={{ margin: 0, color: "var(--mid)", fontSize: 13 }}>
-                  {new Date(trip.departure_datetime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  {fmtTime(trip.departure_datetime)}
                 </p>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 16, marginTop: 10 }}>
                   {trip.bus_name ? (
@@ -340,10 +374,10 @@ export default function ReserveASeat() {
                       {left} {t("seatsLeftLabel")}
                     </span>
                   ) : null}
-                  {trip.route_stops_count ? (
+                  {trip.route_stops?.length ? (
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, color: "var(--mid)" }}>
                       <span className="material-symbols-outlined" style={{ fontSize: 14 }}>location_on</span>
-                      {trip.route_stops_count} {t("stops")}
+                      {trip.route_stops.length} {t("stops")}
                     </span>
                   ) : null}
                 </div>
@@ -352,16 +386,16 @@ export default function ReserveASeat() {
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 <button
                   type="button"
-                  disabled={alreadyReserved || isFull || savingId === trip.id || successPhase === "check"}
+                  disabled={alreadyReserved || isFull || lockedByOtherBooking || savingId === trip.id || successPhase === "check"}
                   onClick={() => reserve(trip.id)}
                   style={{
                     minWidth: 120,
                     borderRadius: "var(--radius-sm)",
                     padding: "10px 12px",
                     border: "1px solid var(--line)",
-                    background: alreadyReserved ? "var(--green-bg)" : isFull ? "var(--red-bg)" : "var(--blue-bg)",
-                    color: alreadyReserved ? "var(--green)" : isFull ? "var(--red)" : "var(--blue)",
-                    cursor: alreadyReserved || isFull ? "not-allowed" : "pointer",
+                    background: alreadyReserved ? "var(--green-bg)" : isFull ? "var(--red-bg)" : lockedByOtherBooking ? "var(--surface2)" : "var(--blue-bg)",
+                    color: alreadyReserved ? "var(--green)" : isFull ? "var(--red)" : lockedByOtherBooking ? "var(--dim)" : "var(--blue)",
+                    cursor: alreadyReserved || isFull || lockedByOtherBooking ? "not-allowed" : "pointer",
                     fontWeight: 700,
                     display: "inline-flex",
                     alignItems: "center",
@@ -370,7 +404,7 @@ export default function ReserveASeat() {
                   }}
                 >
                   {savingId === trip.id ? (
-                    <span className="spinner-border" style={{ width: 16, height: 16, borderWidth: 2 }} aria-hidden />
+                    <span className="spinner-border" style={{ width: 16, height: 16, borderWidth: 2 }} aria-label={t("loading")} />
                   ) : (
                     state
                   )}

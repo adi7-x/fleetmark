@@ -80,3 +80,7 @@ waf/ssl/*.pem
 elk/certs/**/*.crt
 elk/certs/**/*.key
 elk/certs/**/*.pem
+
+# Local QA screenshots and the generated demo video
+.playwright-mcp/
+demo-video/

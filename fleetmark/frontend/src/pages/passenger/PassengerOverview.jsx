@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import EmptyState from "../../components/ui/EmptyState";
 import RouteMap from "../../components/ui/RouteMap";
 import useCountUp from "../../hooks/useCountUp";
-import { API_BASE, getUser } from "../../services/api";
+import { API_BASE, getUser, getAccessToken, authFetch } from "../../services/api";
 import { useTranslation } from "../../context/TranslationContext";
+import { fmtDateTime, fmtTime, inTonightWindow } from "../../utils/datetime";
 
 function getGreetingKey() {
   const hour = new Date().getHours();
@@ -13,18 +13,6 @@ function getGreetingKey() {
   return "greetEvening";
 }
 
-function timeAgo(dateStr) {
-  if (!dateStr) return "";
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "Just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  if (days < 7) return `${days}d ago`;
-  return new Date(dateStr).toLocaleDateString();
-}
 
 /* ── Skeleton loader — only for trip card + stats ── */
 function TripCardSkeleton() {
@@ -112,8 +100,8 @@ export default function PassengerOverview() {
   const { t } = useTranslation();
   const [user, setUser] = useState(() => getUser());
   const [trips, setTrips] = useState([]);
-  const [buses, setBuses] = useState([]);
   const [reservations, setReservations] = useState([]);
+  const [history, setHistory] = useState([]);
   const [urgentAlerts, setUrgentAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -128,19 +116,18 @@ export default function PassengerOverview() {
     setLoading(true);
     setError("");
     try {
-      const token = localStorage.getItem("fleetmark_access");
+      const token = getAccessToken();
       if (!token) throw new Error("Please log in to view your dashboard.");
 
-      const headers = { 
-        Authorization: `Bearer ${token}`, "X-API-Key": import.meta.env.VITE_API_KEY,
-        "X-API-Key": import.meta.env.VITE_API_KEY
+      const headers = {
+        Authorization: `Bearer ${token}`,
       };
 
       const fetchWithTimeout = async (url) => {
         const controller = new AbortController();
         const id = setTimeout(() => controller.abort(), 5000);
         try {
-          const r = await fetch(url, { headers, signal: controller.signal });
+          const r = await authFetch(url, { headers, signal: controller.signal });
           clearTimeout(id);
           return r.ok ? r.json() : [];
         } catch {
@@ -153,12 +140,12 @@ export default function PassengerOverview() {
       const mePromise = fetchWithTimeout(`${API_BASE}/auth/me/`);
 
       // Start trips/reservations/buses using cached user while profile loads
-      let cachedUser = getUser();
+      const cachedUser = getUser();
 
-      const [meData, resData, busData, annData] = await Promise.all([
+      const [meData, resData, histData, annData] = await Promise.all([
         mePromise,
-        fetchWithTimeout(`${API_BASE}/reservations/?user_id=${encodeURIComponent(cachedUser.id)}`),
-        fetchWithTimeout(`${API_BASE}/buses/`),
+        fetchWithTimeout(`${API_BASE}/reservations/`),
+        fetchWithTimeout(`${API_BASE}/reservations/history/`),
         fetchWithTimeout(`${API_BASE}/announcements/`),
       ]);
 
@@ -178,7 +165,7 @@ export default function PassengerOverview() {
       if (aliveRef.current) {
         setTrips(Array.isArray(tripData) ? tripData : []);
         setReservations(Array.isArray(resData) ? resData : []);
-        setBuses(Array.isArray(busData) ? busData : []);
+        setHistory(Array.isArray(histData) ? histData : []);
         setUrgentAlerts(Array.isArray(annData) ? annData.filter(a => a.priority === "urgent" && !a.is_dismissed) : []);
       }
     } catch (err) {
@@ -194,16 +181,27 @@ export default function PassengerOverview() {
     return () => window.removeEventListener("fleetmark:refresh", load);
   }, [load]);
 
-  const tonightTrip = trips[0];
-  const hasReservedTonight = tonightTrip
-    ? reservations.some((r) => (r.trip_details?.id || r.trip) === tonightTrip.id)
-    : false;
-  const tonightBus = tonightTrip ? buses.find((b) => b.id === tonightTrip.bus) : null;
-  const cap = tonightBus ? Number(tonightBus.seat_capacity ?? 0) : Number(tonightTrip?.bus_seat_capacity ?? 0);
+  // The card shows the trip you booked tonight; otherwise the next one you could book.
+  // History too: the cron archives a trip 25 min after it leaves, moving the
+  // booking out of /reservations/ while it still uses tonight's one seat.
+  const bookedTonight = [...reservations, ...history]
+    .map((r) => r.trip_details)
+    .find((trip) => trip && inTonightWindow(trip.departure_datetime));
+  const tonightTrip = bookedTonight || trips[0];
+  const hasReservedTonight = !!bookedTonight;
+  const cap = Number(tonightTrip?.bus_seat_capacity ?? 0);
   const left = tonightTrip ? Number(tonightTrip.seats_left ?? 0) : 0;
-  const ridesThisMonth = reservations.filter((r) => {
-    const date = r.created_at ? new Date(r.created_at) : null;
-    if (!date) return false;
+  const stops = tonightTrip?.route_stops || [];
+  const myStop = user?.station_name;
+  // Map summary: campus → your stop → end of the line (real stop names).
+  const mapStops = [...new Set(["1337", stops.includes(myStop) ? myStop : stops[0], stops[stops.length - 1]].filter(Boolean))];
+
+  const allRides = [...reservations, ...history]
+    .filter((r) => r.trip_details)
+    .sort((a, b) => new Date(b.trip_details.departure_datetime) - new Date(a.trip_details.departure_datetime));
+  const pastRides = allRides.filter((r) => new Date(r.trip_details.departure_datetime) < new Date());
+  const ridesThisMonth = pastRides.filter((r) => {
+    const date = new Date(r.trip_details.departure_datetime);
     const now = new Date();
     return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
   }).length;
@@ -215,7 +213,7 @@ export default function PassengerOverview() {
     <div style={{ display: "grid", gap: 28 }}>
       {/* ── Greeting — always visible ─────────── */}
       <section className="animate-in">
-        <h1
+        <h2
           style={{
             margin: 0,
             fontSize: 28,
@@ -225,8 +223,8 @@ export default function PassengerOverview() {
           }}
         >
           {t(getGreetingKey())}, {userName}{" "}
-          <span style={{ fontSize: 26 }}>👋</span>
-        </h1>
+          <span style={{ fontSize: 26 }} aria-hidden="true">👋</span>
+        </h2>
         <p style={{ margin: "6px 0 0", fontSize: 14, color: "var(--mid)" }}>
           {t("dashSubtitle")}
         </p>
@@ -308,7 +306,7 @@ export default function PassengerOverview() {
               whiteSpace: "nowrap",
             }}
           >
-            {urgentAlerts.length > 1 ? `+${urgentAlerts.length - 1} more` : "View"}
+            {urgentAlerts.length > 1 ? t("plusMore").replace("{{n}}", urgentAlerts.length - 1) : t("view")}
           </button>
         </section>
       )}
@@ -429,26 +427,23 @@ export default function PassengerOverview() {
                   {tonightTrip.route_name || "—"}
                 </h2>
                 <p style={{ margin: 0, color: "var(--mid)", fontSize: 13 }}>
-                  The active night loop for your station.
+                  {hasReservedTonight ? t("tripCardBooked") : t("tripCardNext")}
                 </p>
               </div>
 
               <div style={{ display: "flex", alignItems: "baseline", gap: 16 }}>
                 <span className="mono" style={{ fontSize: 48, fontWeight: 700, letterSpacing: "-0.04em" }}>
-                  {new Date(tonightTrip.departure_datetime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  {fmtTime(tonightTrip.departure_datetime)}
                 </span>
-                <span className="mono" style={{ color: "var(--green)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em", display: "inline-flex", alignItems: "center", gap: 8 }}>
-                  {!hasReservedTonight ? (
-                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--green)", animation: "fm-pulse 1.8s ease-in-out infinite" }} />
-                  ) : null}
-                  {hasReservedTonight ? `${t("reserved")} ✓` : t("inTransit")}
+                <span className="mono" style={{ color: hasReservedTonight ? "var(--green)" : "var(--blue)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                  {hasReservedTonight ? `${t("reserved")} ✓` : t("seatsOpen")}
                 </span>
               </div>
 
               <div style={{ borderTop: "1px solid var(--border)", paddingTop: 14, display: "flex", gap: 30 }}>
                 <div>
                   <span style={{ fontSize: 10, textTransform: "uppercase", color: "var(--dim)", fontWeight: 700 }}>{t("seatsLeft")}</span>
-                  <div className="mono" style={{ fontSize: 18 }}>{cap > 0 || left >= 0 ? `${left}/${cap || "—"}` : "-"}</div>
+                  <div className="mono" style={{ fontSize: 18 }}>{cap > 0 ? `${left}/${cap}` : left}</div>
                 </div>
                 <div>
                   <span style={{ fontSize: 10, textTransform: "uppercase", color: "var(--dim)", fontWeight: 700 }}>{t("bus")}</span>
@@ -456,18 +451,20 @@ export default function PassengerOverview() {
                 </div>
                 <div>
                   <span style={{ fontSize: 10, textTransform: "uppercase", color: "var(--dim)", fontWeight: 700 }}>{t("stops")}</span>
-                  <div className="mono" style={{ fontSize: 18 }}>{tonightTrip.route_stops_count || "—"}</div>
+                  <div className="mono" style={{ fontSize: 18 }}>{stops.length || "—"}</div>
                 </div>
               </div>
             </div>
 
             <div className="trip-card-map-panel" style={{ background: "var(--surface2)", borderLeft: "1px solid var(--border)", padding: 24, display: "grid", alignContent: "center", gap: 18 }}>
               <div style={{ position: "relative", width: "100%", borderRadius: 12, border: "1px solid color-mix(in srgb, var(--border) 50%, transparent)", background: "var(--surface)", overflow: "hidden", display: "grid", placeItems: "center", padding: "16px 8px" }}>
-                <RouteMap compact animated currentStop={0} />
+                {mapStops.length > 1 ? (
+                  <RouteMap compact stops={mapStops} highlight={Math.max(0, mapStops.indexOf(myStop))} />
+                ) : null}
               </div>
               <button
                 type="button"
-                onClick={() => navigate("/passenger/reserve")}
+                onClick={() => navigate(hasReservedTonight ? "/passenger/live-map" : "/passenger/reserve")}
                 style={{
                   border: "1px solid var(--blue-bdr)",
                   background: hasReservedTonight ? "var(--green-light)" : "var(--blue-light)",
@@ -480,7 +477,7 @@ export default function PassengerOverview() {
                   transition: "all 0.18s ease",
                 }}
               >
-                {hasReservedTonight ? `${t("reserved")} ✓` : t("reserveNow")}
+                {hasReservedTonight ? t("quickTrackBus") : t("reserveNow")}
               </button>
             </div>
           </div>
@@ -582,7 +579,7 @@ export default function PassengerOverview() {
           />
           <PassengerStatCard
             label={t("statTotalRides")}
-            value={reservations.length}
+            value={pastRides.length}
             sub={t("statLifetime")}
             icon="directions_bus"
             color="var(--amber)"
@@ -596,7 +593,7 @@ export default function PassengerOverview() {
         <section className="animate-in" style={{ display: "grid", gap: 12 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
             <h3 style={{ margin: 0, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.2em", color: "var(--dim)" }}>
-              Recent Activity
+              {t("recentActivity")}
             </h3>
             <button
               type="button"
@@ -607,7 +604,9 @@ export default function PassengerOverview() {
             </button>
           </div>
           <div style={{ display: "grid", gap: 10 }}>
-            {reservations.slice(0, 3).map((reservation) => (
+            {allRides.slice(0, 3).map((reservation) => {
+              const upcoming = new Date(reservation.trip_details.departure_datetime) > new Date();
+              return (
               <div
                 key={reservation.id}
                 style={{
@@ -626,9 +625,9 @@ export default function PassengerOverview() {
                     <span className="material-symbols-outlined" style={{ fontSize: 20, fontVariationSettings: "'FILL' 1" }}>directions_bus</span>
                   </div>
                   <div>
-                    <p style={{ margin: 0, fontWeight: 700, fontSize: 14 }}>{reservation.trip_details?.route_name || "Shuttle Trip"}</p>
+                    <p style={{ margin: 0, fontWeight: 700, fontSize: 14 }}>{reservation.trip_details.route_name}</p>
                     <p style={{ margin: "3px 0 0", color: "var(--dim)", fontSize: 12 }}>
-                      {timeAgo(reservation.trip_details?.departure_datetime || reservation.created_at)}
+                      {fmtDateTime(reservation.trip_details.departure_datetime)}
                     </p>
                   </div>
                 </div>
@@ -641,17 +640,18 @@ export default function PassengerOverview() {
                     borderRadius: 999,
                     fontSize: 11,
                     fontWeight: 700,
-                    background: "var(--green-light)",
-                    color: "var(--green)",
-                    border: "1px solid var(--green-border)",
+                    background: upcoming ? "var(--blue-light)" : "var(--green-light)",
+                    color: upcoming ? "var(--blue)" : "var(--green)",
+                    border: `1px solid ${upcoming ? "var(--blue-border)" : "var(--green-border)"}`,
                   }}
                 >
-                  <span className="material-symbols-outlined" style={{ fontSize: 12, fontVariationSettings: "'FILL' 1" }}>check_circle</span>
-                  {t("completed")}
+                  <span className="material-symbols-outlined" style={{ fontSize: 12, fontVariationSettings: "'FILL' 1" }}>{upcoming ? "schedule" : "check_circle"}</span>
+                  {upcoming ? t("booked") : t("completed")}
                 </span>
               </div>
-            ))}
-            {!reservations.length ? (
+              );
+            })}
+            {!allRides.length ? (
               <div
                 style={{
                   border: "1px solid var(--border)",
@@ -689,36 +689,6 @@ export default function PassengerOverview() {
           </div>
         </section>
       )}
-      {/* ── FAB — Quick reserve ────────────────── */}
-      <button
-        type="button"
-        onClick={() => navigate("/passenger/reserve")}
-        aria-label="Book a seat"
-        style={{
-          position: "fixed",
-          bottom: 90,
-          right: 24,
-          zIndex: 15,
-          width: 56,
-          height: 56,
-          borderRadius: "50%",
-          border: "none",
-          background: "var(--blue)",
-          color: "#fff",
-          boxShadow: "0 6px 20px color-mix(in srgb, var(--blue) 40%, transparent)",
-          cursor: "pointer",
-          display: "grid",
-          placeItems: "center",
-          transition: "transform 0.2s ease, box-shadow 0.2s ease",
-        }}
-        onMouseDown={(e) => (e.currentTarget.style.transform = "scale(0.92)")}
-        onMouseUp={(e) => (e.currentTarget.style.transform = "scale(1)")}
-        onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
-      >
-        <span className="material-symbols-outlined" style={{ fontSize: 26, fontVariationSettings: "'FILL' 1" }}>
-          event_seat
-        </span>
-      </button>
     </div>
   );
 }
