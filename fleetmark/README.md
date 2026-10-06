@@ -237,7 +237,7 @@ Browser → https://localhost:8443
                                           └─ PostgreSQL
 ```
 
-> In the development compose file, the backend (`:8000`), frontend (`:5174`) and PostgreSQL (`:5433`) ports are also published on the host, and those requests bypass the WAF. Use `:8443`. Remove those port mappings for any real deployment.
+> In the development compose file, the backend (`:8000`), frontend (`:5174`) and PostgreSQL (`:5433`) ports are published on `127.0.0.1` only, for local debugging. From the network, the only way in is the WAF on `:8443`.
 
 ---
 

@@ -6,6 +6,7 @@ from urllib.parse import urlencode
 import requests
 from django.conf import settings
 from django.shortcuts import redirect as django_redirect
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 from rest_framework import generics, status
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -40,7 +41,7 @@ INTRA_42_AUTHORIZE_URL = 'https://api.intra.42.fr/oauth/authorize'
 INTRA_42_TOKEN_URL = 'https://api.intra.42.fr/oauth/token'
 INTRA_42_USER_URL = 'https://api.intra.42.fr/v2/me'
 
-ADMIN_42_LOGIN = os.environ.get('ADMIN_42_LOGIN', '')
+ADMIN_42_LOGIN = getattr(settings, 'ADMIN_42_LOGIN', '')
 FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:5173')
 
 # CSRF protection for the OAuth flow: a random `state` is issued at /42/login/,
@@ -57,6 +58,17 @@ OAUTH_STATE_MAX_AGE = 600  # seconds (10 minutes to complete the 42 login)
 # that's the one kept out of reach of any JS running on the page.
 REFRESH_COOKIE = 'fleetmark_refresh'
 REFRESH_COOKIE_PATH = '/api/v1/auth/'
+
+
+def _revoke_refresh_cookie(request):
+    """Blacklist the refresh token in the request cookie, if any, so a copy of
+    it (shared machine, stolen cookie) stops working after logout."""
+    raw = request.COOKIES.get(REFRESH_COOKIE)
+    if raw:
+        try:
+            RefreshToken(raw).blacklist()
+        except TokenError:
+            pass
 
 
 def _set_refresh_cookie(response, refresh_token_str):
@@ -190,17 +202,24 @@ class OAuth42CallbackView(APIView):
         # ── Step 3: Get or create local user ─────────────────────────────
         role = 'LOGISTICS_STAFF' if login_42 == ADMIN_42_LOGIN else 'STUDENT'
 
-        user, created = User.objects.get_or_create(
-            login_42=login_42,
-            defaults={
-                'email': email,
-                'role': role,
-                'avatar_url': avatar_url,
-            },
-        )
+        try:
+            with transaction.atomic():
+                user, created = User.objects.get_or_create(
+                    login_42=login_42,
+                    defaults={
+                        'email': email,
+                        'role': role,
+                        'avatar_url': avatar_url,
+                    },
+                )
+        except IntegrityError:
+            return _oauth_error(request, 'This email is already linked to another account.', 'provider', status.HTTP_409_CONFLICT)
 
-        # If user existed but email changed on 42 side, update it
-        if not created and user.email != email:
+        if not user.is_active:
+            return _oauth_error(request, 'This account has been deactivated.', 'blocked', status.HTTP_403_FORBIDDEN)
+
+        # If user existed but email changed on 42 side, update it (unless taken)
+        if not created and user.email != email and not User.objects.filter(email=email).exclude(pk=user.pk).exists():
             user.email = email
             user.save(update_fields=['email'])
 
@@ -208,9 +227,6 @@ class OAuth42CallbackView(APIView):
         if not created and avatar_url and user.avatar_url != avatar_url:
             user.avatar_url = avatar_url
             user.save(update_fields=['avatar_url'])
-
-        if not user.is_active:
-            return _oauth_error(request, 'This account has been deactivated.', 'blocked', status.HTTP_403_FORBIDDEN)
 
         # Promote to staff if login matches admin login and role was wrong
         if login_42 == ADMIN_42_LOGIN and user.role != 'LOGISTICS_STAFF':
@@ -401,14 +417,23 @@ class GDPRAccountDeleteView(APIView):
         user.is_active = False
         user.station = None
         user.set_unusable_password()
-        user.save(update_fields=['login_42', 'email', 'is_active', 'station', 'password'])
+        user.role = 'STUDENT'
+        user.is_staff = False
+        user.totp_secret = None
+        user.totp_enabled = False
+        user.avatar_url = None
+        user.save(update_fields=['login_42', 'email', 'is_active', 'station', 'password',
+                                 'role', 'is_staff', 'totp_secret', 'totp_enabled', 'avatar_url'])
 
         logger.info('GDPR account deletion completed for user %s', user.id)
 
-        return Response(
+        resp = Response(
             {'detail': 'Your account has been anonymised and deactivated.'},
             status=status.HTTP_200_OK,
         )
+        _revoke_refresh_cookie(request)
+        resp.delete_cookie(REFRESH_COOKIE, path=REFRESH_COOKIE_PATH)
+        return resp
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -419,8 +444,9 @@ class GDPRAccountDeleteView(APIView):
 # brute-forced from many IPs (the anon rate limit is per IP). After
 # TOTP_MAX_FAILURES wrong codes the account's 2FA checks are locked for
 # TOTP_LOCK_SECONDS, whichever endpoint or IP the attempts come from.
-# ponytail: default cache is per-process; use a shared cache (Redis/DB) if
-# the backend ever runs several workers.
+# ponytail: the default cache is per-process, so production runs ONE gunicorn
+# process with threads (entrypoint.sh). Switch to RedisCache (atomic INCR)
+# before raising --workers.
 TOTP_MAX_FAILURES = 5
 TOTP_LOCK_SECONDS = 15 * 60
 
@@ -431,21 +457,30 @@ def _check_totp(user, code):
     from django.core.cache import cache
 
     key = f'totp-failures:{user.pk}'
-    if cache.get(key, 0) >= TOTP_MAX_FAILURES:
+    # Reserve the attempt atomically *before* checking the code, so parallel
+    # requests can't all read "0 failures" and slip past the limit.
+    cache.add(key, 0, TOTP_LOCK_SECONDS)
+    try:
+        attempts = cache.incr(key)
+    except ValueError:  # key expired between add() and incr()
+        cache.add(key, 1, TOTP_LOCK_SECONDS)
+        attempts = 1
+    if attempts > TOTP_MAX_FAILURES:
+        if attempts == TOTP_MAX_FAILURES + 1:
+            logger.warning('2FA locked for user %s after %d wrong codes', user.pk, TOTP_MAX_FAILURES)
         return Response(
             {'detail': 'Too many wrong codes. Try again in 15 minutes.'},
             status=status.HTTP_429_TOO_MANY_REQUESTS,
         )
-    if pyotp.TOTP(user.totp_secret).verify(str(code), valid_window=1):
-        # A code stays valid for up to 90 s (valid_window=1); accept each code once.
-        used_key = f'totp-used:{user.pk}:{code}'
-        if not cache.add(used_key, True, 90):
-            cache.set(key, cache.get(key, 0) + 1, TOTP_LOCK_SECONDS)
-            return Response({'detail': 'Invalid code.'}, status=status.HTTP_400_BAD_REQUEST)
-        cache.delete(key)
-        return None
-    cache.set(key, cache.get(key, 0) + 1, TOTP_LOCK_SECONDS)
-    return Response({'detail': 'Invalid code.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    code = str(code).strip()
+    if not (code.isascii() and code.isdigit() and len(code) == 6) or not pyotp.TOTP(user.totp_secret).verify(code, valid_window=1):
+        return Response({'detail': 'Invalid code.'}, status=status.HTTP_400_BAD_REQUEST)
+    # A code stays valid for up to 90 s (valid_window=1); accept each code once.
+    if not cache.add(f'totp-used:{user.pk}:{code}', True, 90):
+        return Response({'detail': 'Invalid code.'}, status=status.HTTP_400_BAD_REQUEST)
+    cache.delete(key)
+    return None
 
 
 class TOTPSetupView(APIView):
@@ -614,6 +649,15 @@ class TOTPLoginVerifyView(APIView):
         if denied:
             return denied
 
+        # A pre-auth token buys exactly one session (checked after the code so
+        # a typo doesn't burn it). cache.add is atomic.
+        from django.core.cache import cache
+        if not cache.add(f'preauth-used:{preauth["jti"]}', 1, int(PreAuth2FAToken.lifetime.total_seconds())):
+            return Response(
+                {'detail': 'Invalid or expired login attempt. Please log in again.'},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
         refresh = RefreshToken.for_user(user)
         access_tok = str(refresh.access_token)
         user_data = UserSerializer(user).data
@@ -680,8 +724,15 @@ class LogoutView(APIView):
     after (ACCESS_TOKEN_LIFETIME).
     """
     permission_classes = [AllowAny]
+    # Removing a credential must never be rate-limited away.
+    throttle_classes = []
 
     def post(self, request):
+        # A cross-site HTML form can't send application/json, and a cross-site
+        # fetch with it needs a CORS preflight the allowlist refuses.
+        if request.content_type != 'application/json':
+            return Response({'detail': 'Bad request.'}, status=status.HTTP_400_BAD_REQUEST)
+        _revoke_refresh_cookie(request)
         resp = Response({'detail': 'Logged out.'}, status=status.HTTP_200_OK)
         resp.delete_cookie(REFRESH_COOKIE, path=REFRESH_COOKIE_PATH)
         return resp

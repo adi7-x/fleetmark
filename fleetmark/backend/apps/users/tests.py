@@ -360,7 +360,7 @@ class LogoutViewTest(TestCase):
 
     def test_logout_clears_refresh_cookie(self):
         self.client.cookies['fleetmark_refresh'] = 'some-refresh-token'
-        response = self.client.post('/api/v1/auth/logout/')
+        response = self.client.post('/api/v1/auth/logout/', {}, format='json')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.cookies['fleetmark_refresh'].value, '')
 
@@ -546,3 +546,30 @@ class TOTPAbuseTest(TestCase):
         good = pyotp.TOTP(self.secret).now()
         self.assertEqual(self.client.post('/api/v1/auth/2fa/verify/', {'code': good}, format='json').status_code, 200)
         self.assertEqual(self.client.post('/api/v1/auth/2fa/verify/', {'code': good}, format='json').status_code, 400)
+
+
+class AuthHardeningTest(TestCase):
+    def test_fullwidth_digits_are_rejected(self):
+        import pyotp
+        from django.core.cache import cache
+        cache.clear()
+        user = User.objects.create_user(email='u@test.com', password='x', login_42='fw')
+        user.totp_secret = pyotp.random_base32()
+        user.save()
+        client = APIClient()
+        client.force_authenticate(user=user)
+        fullwidth = ''.join(chr(0xFF10 + int(d)) for d in pyotp.TOTP(user.totp_secret).now())
+        self.assertEqual(client.post('/api/v1/auth/2fa/verify/', {'code': fullwidth}, format='json').status_code, 400)
+
+    def test_logout_revokes_the_refresh_token(self):
+        from rest_framework_simplejwt.tokens import RefreshToken
+        user = User.objects.create_user(email='l@test.com', password='x', login_42='lo')
+        raw = str(RefreshToken.for_user(user))
+        client = APIClient()
+        client.cookies['fleetmark_refresh'] = raw
+        self.assertEqual(client.post('/api/v1/auth/logout/', {}, format='json').status_code, 200)
+        client.cookies['fleetmark_refresh'] = raw
+        self.assertEqual(client.post('/api/v1/auth/token/refresh/').status_code, 401)
+
+    def test_logout_rejects_cross_site_form_posts(self):
+        self.assertEqual(APIClient().post('/api/v1/auth/logout/', {'a': 1}).status_code, 400)

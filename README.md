@@ -295,7 +295,8 @@ Each item below was checked in the code.
 - **2FA on the server.** For a 2FA account, the OAuth callback issues only a 5-minute pre-auth token. No endpoint except `/2fa/login-verify/` accepts it, and that endpoint requires a valid TOTP code.
 - **RBAC.** Every view checks permissions (`IsAuthenticated` by default, `IsLogisticsStaff` for admin endpoints). Students only see their own reservations and reports. The user-management API cannot delete users.
 - **Rate limits.** DRF throttling: 100 requests/hour anonymous, 1,000/hour per user, 600/hour for token refresh. `NUM_PROXIES=1` stops clients from bypassing the limit with a spoofed `X-Forwarded-For`. NGINX adds `limit_req` on `/api/` (30 req/s per IP, burst 20).
-- **Local-development caveats.** For convenience, `docker-compose.yml` also publishes the backend (`8000`), frontend (`5174`) and PostgreSQL (`5433`) ports on the host, and those bypass the WAF. `.env.example` sets `APP_DEBUG=true`. A real deployment should unpublish those ports and set `APP_DEBUG=false`, which switches the backend to gunicorn and turns on Django's HTTPS and HSTS settings.
+- **Two-factor hardening.** 5 wrong codes lock 2FA on the account for 15 minutes. Each code is accepted only once, ASCII digits only, and a pre-auth token works for a single login. Logout revokes the refresh token (SimpleJWT blacklist), and blocked users cannot refresh.
+- **Local-development caveats.** The backend (`8000`), frontend (`5174`) and PostgreSQL (`5433`) ports are published for debugging, but only on `127.0.0.1`. From the network, the only way in is the WAF on `8443`. `.env.example` sets `APP_DEBUG=true`. A real deployment should set `APP_DEBUG=false`, which switches the backend to gunicorn (one process with threads, because the 2FA lockout uses the in-process cache) and turns on Django's HTTPS and HSTS settings.
 
 ---
 

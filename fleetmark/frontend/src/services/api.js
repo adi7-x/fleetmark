@@ -257,6 +257,9 @@ export const auth = {
       await fetch(buildUrl('auth/logout/'), {
         method: 'POST',
         credentials: 'include',
+        // The backend only accepts JSON here (blocks cross-site form logout).
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
       });
     } catch {
       // Best-effort — still clear local state even if the request fails.

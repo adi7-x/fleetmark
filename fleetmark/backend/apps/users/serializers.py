@@ -55,6 +55,9 @@ class UserAdminSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'login_42', 'email', 'avatar_url', 'totp_enabled', 'created_at']
 
     def validate(self, attrs):
+        # GDPR-deleted rows stay only for audit; re-enabling one would revive it.
+        if self.instance is not None and self.instance.login_42 is None:
+            raise serializers.ValidationError('Anonymised (GDPR-deleted) accounts cannot be modified.')
         request = self.context.get('request')
         changes_access = self.instance is not None and (
             attrs.get('role', self.instance.role) != self.instance.role or attrs.get('is_active') is False

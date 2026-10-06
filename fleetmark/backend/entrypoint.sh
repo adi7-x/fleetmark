@@ -55,7 +55,8 @@ case "$APP_DEBUG_LC" in
         echo "🚀 Starting gunicorn (production)..."
         exec gunicorn ssbs.wsgi:application \
             --bind 0.0.0.0:8000 \
-            --workers "${GUNICORN_WORKERS:-3}" \
+            --workers 1 \
+            --threads "${GUNICORN_THREADS:-4}" \
             --access-logfile - \
             --error-logfile -
         ;;

@@ -25,7 +25,7 @@ services:
       timeout: 5s
       retries: 5
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     networks:
       - ssbs-network
 
@@ -93,7 +93,7 @@ services:
       - vault-approle:/vault/approle:ro
       - ./logs:/var/log/ssbs
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     env_file:
       - .env
     environment:
@@ -138,7 +138,7 @@ services:
     restart: unless-stopped
     entrypoint: ["/entrypoint.sh"]
     ports:
-      - "5174:5174"
+      - "127.0.0.1:5174:5174"
     volumes:
       - ./fleetmark/frontend:/app
       - ssbs-frontend-node-modules:/app/node_modules
