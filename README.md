@@ -27,9 +27,9 @@ A night-shuttle seat-booking web app. Students sign in with their 42 account, pi
 
 ## Demo
 
-**Video:** [FleetMark walkthrough, 52 seconds, in French](docs/demo/fleetmark-demo.mp4)
+**Video:** [FleetMark walkthrough, 1 minute, in English](docs/demo/fleetmark-demo-en.mp4) · [French version](docs/demo/fleetmark-demo.mp4)
 
-The screenshots below use the French interface. English is one click away.
+The screenshots below use the English interface. French is one click away.
 
 | | |
 |---|---|
